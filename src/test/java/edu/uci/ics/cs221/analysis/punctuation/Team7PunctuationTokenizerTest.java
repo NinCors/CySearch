@@ -7,6 +7,8 @@ import java.util.Arrays;
 import java.util.List;
 
 import static org.junit.Assert.*;
+
+import edu.uci.ics.cs221.analysis.StopWords;
 import org.junit.Test;
 
 public class Team7PunctuationTokenizerTest {
@@ -37,4 +39,5 @@ public class Team7PunctuationTokenizerTest {
         PunctuationTokenizer tokenizer = new PunctuationTokenizer();
         assertEquals(output, tokenizer.tokenize(input));
     }
+
 }
