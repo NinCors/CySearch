@@ -1,13 +1,11 @@
 package edu.uci.ics.cs221.analysis;
 
-import org.omg.Messaging.SYNC_WITH_TRANSPORT;
 
-import java.lang.reflect.Array;
 import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.ArrayList;
-import java.util.Arrays;
+
 import java.util.List;
 import java.util.HashMap;
 
@@ -52,7 +50,8 @@ public class WordBreakTokenizer implements Tokenizer {
         try {
             // load the dictionary corpus
             URL dictResource = WordBreakTokenizer.class.getClassLoader().getResource("cs221_frequency_dictionary_en.txt");
-            this.dictLines = Files.readAllLines(Paths.get(dictResource.toURI()));
+            List<String> dl = Files.readAllLines(Paths.get(dictResource.toURI()));
+            this.dictLines = dl;
 
         } catch (Exception e) {
             throw new RuntimeException(e);
@@ -63,6 +62,7 @@ public class WordBreakTokenizer implements Tokenizer {
      * Get the hashmap from dictionary
      * @return A Hashmap contain <word, probability>
      */
+
     public HashMap<String, Double> getHashMap(){
         HashMap<String, Double> map = new HashMap<>();
 
