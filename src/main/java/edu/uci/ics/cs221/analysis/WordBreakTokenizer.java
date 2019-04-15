@@ -61,6 +61,23 @@ public class WordBreakTokenizer implements Tokenizer {
         }
     }
 
+    public WordBreakTokenizer(String language) {
+        String dict_name = "";
+        if(language == "jp"){
+            dict_name = "freq_dict_jp.txt";
+        }
+        try {
+            // load the dictionary corpus
+            URL dictResource = WordBreakTokenizer.class.getClassLoader().getResource(dict_name);
+            List<String> dl = Files.readAllLines(Paths.get(dictResource.toURI()));
+            this.dictLines = dl;
+
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+
     /**
      * Get the hashmap from dictionary
      * @return A Hashmap contain <word, probability>
@@ -89,31 +106,10 @@ public class WordBreakTokenizer implements Tokenizer {
         return map;
     }
 
-    public List<String> tokenize(String text, String language){
-        if(language == "jp"){
-            try {
-                // load the dictionary corpus
-                URL dictResource = WordBreakTokenizer.class.getClassLoader().getResource("freq_dict_jp.txt");
-                List<String> dl = Files.readAllLines(Paths.get(dictResource.toURI()));
-                this.dictLines = dl;
-
-            } catch (Exception e) {
-                throw new RuntimeException(e);
-            }
-        }
-        return execute(text);
-    }
-
 
     public List<String> tokenize(String text) {
-        return execute(text);
-    }
-
-
-    public List<String> execute(String text){
+        if(text == null || text.length() == 0){return new ArrayList<>();}
         map = getHashMap();
-        List<String> empty = new ArrayList<>();
-        if(text == null || text.length() == 0){return empty;}
         text = text.toLowerCase();
         //System.out.println(map.get("undermining"));
         int size = text.length();

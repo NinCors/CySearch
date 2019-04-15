@@ -14,9 +14,9 @@ public class JapaneseWordBreakTokenizerTest {
         String text = "関西国際空港";
         List<String> expected = Arrays.asList("関西","国際","空港");
 
-        WordBreakTokenizer tokenizer = new WordBreakTokenizer();
+        WordBreakTokenizer tokenizer = new WordBreakTokenizer("jp");
 
-        assertEquals(expected, tokenizer.tokenize(text,"jp"));
+        assertEquals(expected, tokenizer.tokenize(text));
     }
 
     @Test
@@ -24,9 +24,9 @@ public class JapaneseWordBreakTokenizerTest {
         String text = "俺は海贼王になる男だ";
         List<String> expected = Arrays.asList("俺", "は", "海贼王", "に", "なる", "男", "だ");
 
-        WordBreakTokenizer tokenizer = new WordBreakTokenizer();
+        WordBreakTokenizer tokenizer = new WordBreakTokenizer("jp");
 
-        assertEquals(expected, tokenizer.tokenize(text,"jp"));
+        assertEquals(expected, tokenizer.tokenize(text));
     }
 
 
@@ -35,9 +35,9 @@ public class JapaneseWordBreakTokenizerTest {
         String text = "真実はいつも一つ";
         List<String> expected = Arrays.asList("真実", "は", "いつも", "一つ");
 
-        WordBreakTokenizer tokenizer = new WordBreakTokenizer();
+        WordBreakTokenizer tokenizer = new WordBreakTokenizer("jp");
 
-        assertEquals(expected, tokenizer.tokenize(text,"jp"));
+        assertEquals(expected, tokenizer.tokenize(text));
     }
 
     @Test
@@ -45,9 +45,9 @@ public class JapaneseWordBreakTokenizerTest {
         String text = "私は天才です";
         List<String> expected = Arrays.asList("私", "は", "天才", "です");
 
-        WordBreakTokenizer tokenizer = new WordBreakTokenizer();
+        WordBreakTokenizer tokenizer = new WordBreakTokenizer("jp");
 
-        assertEquals(expected, tokenizer.tokenize(text,"jp"));
+        assertEquals(expected, tokenizer.tokenize(text));
     }
 
 }
