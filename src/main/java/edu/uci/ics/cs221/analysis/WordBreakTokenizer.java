@@ -47,6 +47,8 @@ import java.util.HashMap;
 public class WordBreakTokenizer implements Tokenizer {
 
     private List<String> dictLines;
+    private HashMap<String, Double> map;
+
     public WordBreakTokenizer() {
         try {
             // load the dictionary corpus
@@ -71,7 +73,7 @@ public class WordBreakTokenizer implements Tokenizer {
         long sum = 0;
         for(String cur:this.dictLines){
             String[] tmp = cur.split(" ");
-            sum += Long.parseLong(tmp[1]);
+            sum += Double.parseDouble(tmp[1]);
         }
         //System.out.println("Sum is : " + sum );
 
@@ -87,11 +89,32 @@ public class WordBreakTokenizer implements Tokenizer {
         return map;
     }
 
+    public List<String> tokenize(String text, String language){
+        if(language == "jp"){
+            try {
+                // load the dictionary corpus
+                URL dictResource = WordBreakTokenizer.class.getClassLoader().getResource("freq_dict_jp.txt");
+                List<String> dl = Files.readAllLines(Paths.get(dictResource.toURI()));
+                this.dictLines = dl;
+
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }
+        return execute(text);
+    }
+
+
     public List<String> tokenize(String text) {
+        return execute(text);
+    }
+
+
+    public List<String> execute(String text){
+        map = getHashMap();
         List<String> empty = new ArrayList<>();
         if(text == null || text.length() == 0){return empty;}
         text = text.toLowerCase();
-        HashMap<String, Double> map = getHashMap();
         //System.out.println(map.get("undermining"));
         int size = text.length();
         double[][] prob = new double[size][size];
@@ -99,7 +122,6 @@ public class WordBreakTokenizer implements Tokenizer {
 
         // <INDEX, List of string>
         HashMap<String, List<String>> res= new HashMap<String,List<String>>();
-
 
         for(int len = 1; len <= size; ++len){
             for(int start = 0; start <= size - len; ++start){
@@ -153,12 +175,6 @@ public class WordBreakTokenizer implements Tokenizer {
             }
         }
 
-        //System.out.println(prob[1][2]);
-        //System.out.println(res);
-
-
-
         return res.get("0"+(size-1));
     }
-
 }
