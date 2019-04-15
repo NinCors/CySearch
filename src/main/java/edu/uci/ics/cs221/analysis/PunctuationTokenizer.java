@@ -35,7 +35,7 @@ public class PunctuationTokenizer implements Tokenizer {
 
     private boolean isEnd(char cur){
         //System.out.println("Testing char is " + cur);
-        if(cur == ' ' || cur == '\t' || cur == '\n' || punctuations.contains(Character.toString(cur))){
+        if(cur == ' ' || cur == '\t' || cur == '\r' || cur == '\n' || punctuations.contains(Character.toString(cur))){
             return true;
         }
         return false;
