@@ -3,37 +3,16 @@ package edu.uci.ics.cs221.analysis.wordbreak;
 import edu.uci.ics.cs221.analysis.WordBreakTokenizer;
 import org.junit.Test;
 
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
 import static org.junit.Assert.assertEquals;
 
-public class WordBreakTokenizerTest {
-
+public class Team12WordBreakTokenizer {
+    //below test tests removing stop words
     @Test
     public void test1() {
-        String text = "catdog";
-        List<String> expected = Arrays.asList("cat", "dog");
-        WordBreakTokenizer tokenizer = new WordBreakTokenizer();
-
-        assertEquals(expected, tokenizer.tokenize(text));
-
-    }
-
-    @Test
-    public void testx() {
-        String text = "ofthe";
-        List<String> expected = new ArrayList<>();
-        WordBreakTokenizer tokenizer = new WordBreakTokenizer();
-
-        assertEquals(expected, tokenizer.tokenize(text));
-
-    }
-
-    @Test
-    public void test() {
-        String text = "lordofthering";
+        String text = "thelordofthering";
         List<String> expected = Arrays.asList("lord", "ring");
         WordBreakTokenizer tokenizer = new WordBreakTokenizer();
 
@@ -61,5 +40,4 @@ public class WordBreakTokenizerTest {
         WordBreakTokenizer tokenizer = new WordBreakTokenizer();
         tokenizer.tokenize(text);
     }
-
 }

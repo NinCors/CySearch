@@ -44,6 +44,7 @@ public class PunctuationTokenizer implements Tokenizer {
     public List<String> tokenize(String text) {
 
         List<String> res = new ArrayList<>();
+        if(text == null){return res;}
         StopWords sw = new StopWords();
 
         int start = 0;
