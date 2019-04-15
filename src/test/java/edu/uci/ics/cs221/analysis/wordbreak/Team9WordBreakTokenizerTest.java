@@ -14,7 +14,7 @@ public class Team9WordBreakTokenizerTest {
     @Test
     public void test1() {
         String text = "";
-        List<String> expected = Arrays.asList("");
+        List<String> expected = Arrays.asList();
         WordBreakTokenizer tokenizer = new WordBreakTokenizer();
 
         assertEquals(expected, tokenizer.tokenize(text));

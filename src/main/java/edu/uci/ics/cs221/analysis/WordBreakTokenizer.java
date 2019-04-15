@@ -6,6 +6,7 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.HashMap;
 
@@ -87,6 +88,8 @@ public class WordBreakTokenizer implements Tokenizer {
     }
 
     public List<String> tokenize(String text) {
+        List<String> empty = new ArrayList<>();
+        if(text == null || text.length() == 0){return empty;}
         text = text.toLowerCase();
         HashMap<String, Double> map = getHashMap();
         //System.out.println(map.get("undermining"));
