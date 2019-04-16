@@ -1,6 +1,7 @@
 package edu.uci.ics.cs221.analysis;
 
 
+import javax.management.RuntimeErrorException;
 import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -131,7 +132,7 @@ public class WordBreakTokenizer implements Tokenizer {
                         if(!sw.stopWords.contains(letter)){
                             tmp.add(letter);
                         }
-                        res.put(start+""+start, tmp);
+                        res.put(start+"-"+start, tmp);
                     }
                     continue;
                 }
@@ -157,8 +158,8 @@ public class WordBreakTokenizer implements Tokenizer {
                                 highest_prob = prob[start][k] + prob[k + 1][end];
                                 //System.out.println(start + " : " + k + " : " + end + "Change prob to : " + highest_prob);
                                 tmp.clear();
-                                tmp.addAll(res.get(start + "" + k));
-                                tmp.addAll(res.get((k + 1) + "" + end));
+                                tmp.addAll(res.get(start + "-" + k));
+                                tmp.addAll(res.get((k + 1) + "-" + end));
                             }
                         }
                     }
@@ -167,10 +168,17 @@ public class WordBreakTokenizer implements Tokenizer {
                 if(highest_prob != -Double.MAX_VALUE){
                     prob[start][end] =highest_prob;
                 }
-                res.put(start+""+end,tmp);
+                res.put(start+"-"+end,tmp);
             }
         }
 
-        return res.get("0"+(size-1));
+        if(res.get("0-"+(size-1)).size() == 1 && res.get("0-"+(size-1)).get(0) == text){
+            throw new RuntimeException();
+        }
+        if(res.get("0-"+(size-1)).size() == 0 && prob[0][size-1] == 0){
+            throw new RuntimeException();
+        }
+
+        return res.get("0-"+(size-1));
     }
 }
