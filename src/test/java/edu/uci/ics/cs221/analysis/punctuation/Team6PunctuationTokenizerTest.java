@@ -1,4 +1,4 @@
-package edu.uci.ics.cs221;
+package edu.uci.ics.cs221.analysis.punctuation;
 import edu.uci.ics.cs221.analysis.PunctuationTokenizer;
 import org.junit.Test;
 

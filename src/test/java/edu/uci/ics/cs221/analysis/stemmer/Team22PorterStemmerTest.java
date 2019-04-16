@@ -22,11 +22,11 @@ public class Team22PorterStemmerTest {
         // This test case test whether stemmer could stem words end with "ible", "ize" and "ion" as well as word in past tense.
 
 
-        String original = "this wall is regarded as one of the indestructible construction in ancient time which was built with"
+        String original = "this wall is regarded as of the indestructible construction in ancient time which was built with"
                 + " marble in standardized size and designed by smartest scientist at that time";
 
-        String expected = "thi wall is regard as on of the indestruct construct in ancient time which wa built with "
-                + "marbl in standard size and design by smartest scientist at that time";
+        String expected = "thi wall is regard as of the indestruct construct in ancient time which wa built with"
+                + " marbl in standard size and design by smartest scientist at that time";
 
 
         PorterStemmer porterStemmer = new PorterStemmer();
