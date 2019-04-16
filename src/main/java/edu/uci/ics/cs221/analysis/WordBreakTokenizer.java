@@ -43,7 +43,10 @@ import java.util.HashMap;
 /**
  * Program logic:
  *      1. Convert the dictionary to the hashmap with probability
- *
+ *      2. Calculate the prob array where prob[i][j] means the highest probability for string(i to j)
+ *      3. Calculate the res hashmap with key format "row-col" and value format "List<String> of words with highest probability"
+ *      4. Follow the DP algorithm in the slides
+ *      5. Get the result from res hashmap with key "0-(len-1) : List<String> "
  */
 public class WordBreakTokenizer implements Tokenizer {
 
@@ -107,6 +110,10 @@ public class WordBreakTokenizer implements Tokenizer {
         return map;
     }
 
+    /**
+     * @param text : the input string
+     * @return List<String> : the tokenized words
+     */
 
     public List<String> tokenize(String text) {
         if(text == null || text.length() == 0){return new ArrayList<>();}
@@ -172,9 +179,13 @@ public class WordBreakTokenizer implements Tokenizer {
             }
         }
 
+
+        // If word break can't find a way to divide the input string
         if(res.get("0-"+(size-1)).size() == 1 && res.get("0-"+(size-1)).get(0) == text){
             throw new RuntimeException();
         }
+
+        // If word break can't do anything about the string due to some special character
         if(res.get("0-"+(size-1)).size() == 0 && prob[0][size-1] == 0){
             throw new RuntimeException();
         }

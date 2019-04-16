@@ -12,13 +12,17 @@ public class WordBreakTokenizerTest {
 
     @Test
     public void test1() {
-        String text = "catdogcatdogcatdogcatdogcatdogcatdogcatdogcatdogcatdogcatdogcatdogcatdogcatdogcatdogcatdogcatdogcatdogcatdogcatdogcatdogcatdogcatdogcatdogcatdogcatdogcatdogcatdogcatdogcatdogcatdogcatdogcatdogcatdogcatdogcatdogcatdogcatdogcatdogcatdogcatdogcatdogcatdogcatdogcatdogcatdogcatdogcatdogcatdogcatdogcatdog";
-        //List<String> expected = Arrays.asList("cat", "dog","cat", "dog","cat", "dog","cat", "dog","cat","dog","cat", "dog","cat", "dog","cat", "dog","cat", "dog","cat", "dog", "dog","cat", "dog","cat", "dog","cat", "dog","cat", "dog","cat", "dog", "dog","cat", "dog","cat", "dog","cat", "dog","cat", "dog","cat", "dog", "dog","cat", "dog","cat", "dog","cat", "dog","cat", "dog","cat", "dog");
-        List<String> expected = Arrays.asList("cat", "dog","cat", "dog","cat", "dog","cat", "dog","cat","dog","cat", "dog","cat", "dog","cat", "dog","cat", "dog","cat","dog","cat", "dog","cat", "dog","cat", "dog","cat", "dog","cat","dog","cat", "dog","cat", "dog","cat", "dog","cat", "dog","cat","dog","cat", "dog","cat", "dog","cat", "dog","cat", "dog","cat","dog","cat", "dog","cat", "dog","cat", "dog","cat", "dog","cat","dog","cat", "dog","cat", "dog","cat", "dog","cat", "dog","cat","dog","cat", "dog","cat", "dog","cat", "dog","cat", "dog","cat","dog","cat", "dog","cat", "dog","cat", "dog","cat", "dog","cat","dog","cat", "dog","cat", "dog","cat", "dog","cat", "dog","cat","dog");
+        String text = "catdog";
+        List<String> expected = Arrays.asList("cat","dog");
         WordBreakTokenizer tokenizer = new WordBreakTokenizer();
-        System.out.println(expected.size());
-        System.out.println(tokenizer.tokenize(text).size());
         assertEquals(expected, tokenizer.tokenize(text));
+
+    }
+    @Test(expected = RuntimeException.class)
+    public void test2() {
+        String text = "apple";
+        WordBreakTokenizer tokenizer = new WordBreakTokenizer();
+        tokenizer.tokenize(text);
 
     }
 
