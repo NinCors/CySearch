@@ -11,6 +11,7 @@ import java.util.Set;
 public class StopWords {
 
     public static Set<String> stopWords = new HashSet<>();
+    public static Set<String> jp_stopWords = new HashSet<>();
     static {
         stopWords.addAll(Arrays.asList(
                 "i",
@@ -142,5 +143,6 @@ public class StopWords {
                 "now"
         ));
     }
+
 
 }

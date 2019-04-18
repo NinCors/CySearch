@@ -22,7 +22,7 @@ public class JapaneseWordBreakTokenizerTest {
     @Test
     public void OnePieceTest() {
         String text = "俺は海贼王になる男だ";
-        List<String> expected = Arrays.asList("俺", "は", "海贼王", "に", "なる", "男", "だ");
+        List<String> expected = Arrays.asList("俺", "海贼王", "男");
 
         WordBreakTokenizer tokenizer = new WordBreakTokenizer("jp");
 
@@ -33,7 +33,7 @@ public class JapaneseWordBreakTokenizerTest {
     @Test
     public void ConanTest() {
         String text = "真実はいつも一つ";
-        List<String> expected = Arrays.asList("真実", "は", "いつも", "一つ");
+        List<String> expected = Arrays.asList("真実", "いつも", "一つ");
 
         WordBreakTokenizer tokenizer = new WordBreakTokenizer("jp");
 
@@ -43,7 +43,7 @@ public class JapaneseWordBreakTokenizerTest {
     @Test
     public void SlamDunkTest() {
         String text = "私は天才です";
-        List<String> expected = Arrays.asList("私", "は", "天才", "です");
+        List<String> expected = Arrays.asList("天才");
 
         WordBreakTokenizer tokenizer = new WordBreakTokenizer("jp");
 

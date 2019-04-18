@@ -52,6 +52,7 @@ public class WordBreakTokenizer implements Tokenizer {
 
     private List<String> dictLines;
     private HashMap<String, Double> map;
+    private StopWords sw;
 
     public WordBreakTokenizer() {
         try {
@@ -59,6 +60,7 @@ public class WordBreakTokenizer implements Tokenizer {
             URL dictResource = WordBreakTokenizer.class.getClassLoader().getResource("cs221_frequency_dictionary_en.txt");
             List<String> dl = Files.readAllLines(Paths.get(dictResource.toURI()));
             this.dictLines = dl;
+            sw = new StopWords();
 
         } catch (Exception e) {
             throw new RuntimeException(e);
@@ -71,6 +73,12 @@ public class WordBreakTokenizer implements Tokenizer {
             dict_name = "freq_dict_jp.txt";
         }
         try {
+            //change stop words
+            sw.stopWords.clear();
+            URL stopword_url = WordBreakTokenizer.class.getClassLoader().getResource("stop_words_jp.txt");
+            List<String> st = Files.readAllLines(Paths.get(stopword_url.toURI()));
+            sw.stopWords.addAll(st);
+
             // load the dictionary corpus
             URL dictResource = WordBreakTokenizer.class.getClassLoader().getResource(dict_name);
             List<String> dl = Files.readAllLines(Paths.get(dictResource.toURI()));
@@ -122,7 +130,6 @@ public class WordBreakTokenizer implements Tokenizer {
         //System.out.println(map.get("undermining"));
         int size = text.length();
         double[][] prob = new double[size][size];
-        StopWords sw = new StopWords();
 
         // <INDEX, List of string>
         HashMap<String, List<String>> res= new HashMap<String,List<String>>();
