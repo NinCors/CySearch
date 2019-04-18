@@ -2,14 +2,11 @@ package edu.uci.ics.cs221.analysis;
 
 
 import javax.management.RuntimeErrorException;
+import java.net.URISyntaxException;
 import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Paths;
-import java.util.ArrayList;
-
-import java.util.Arrays;
-import java.util.List;
-import java.util.HashMap;
+import java.util.*;
 
 /**
  * Project 1, task 2: Implement a Dynamic-Programming based Word-Break Tokenizer.
@@ -52,7 +49,8 @@ public class WordBreakTokenizer implements Tokenizer {
 
     private List<String> dictLines;
     private HashMap<String, Double> map;
-    private StopWords sw;
+    public  Set<String> stopWords;
+
 
     public WordBreakTokenizer() {
         try {
@@ -60,7 +58,8 @@ public class WordBreakTokenizer implements Tokenizer {
             URL dictResource = WordBreakTokenizer.class.getClassLoader().getResource("cs221_frequency_dictionary_en.txt");
             List<String> dl = Files.readAllLines(Paths.get(dictResource.toURI()));
             this.dictLines = dl;
-            sw = new StopWords();
+            StopWords sw = new StopWords();
+            this.stopWords = new HashSet<>(sw.stopWords);
 
         } catch (Exception e) {
             throw new RuntimeException(e);
@@ -69,16 +68,20 @@ public class WordBreakTokenizer implements Tokenizer {
 
     public WordBreakTokenizer(String language) {
         String dict_name = "";
+
         if(language == "jp"){
             dict_name = "freq_dict_jp.txt";
+            //change stop words
+            try {
+                URL stopword_url = WordBreakTokenizer.class.getClassLoader().getResource("stop_words_jp.txt");
+                List<String> st = Files.readAllLines(Paths.get(stopword_url.toURI()));
+                this.stopWords = new HashSet<>(st);
+            }
+            catch (Exception e){
+                throw new RuntimeException(e);
+            }
         }
         try {
-            //change stop words
-            sw.stopWords.clear();
-            URL stopword_url = WordBreakTokenizer.class.getClassLoader().getResource("stop_words_jp.txt");
-            List<String> st = Files.readAllLines(Paths.get(stopword_url.toURI()));
-            sw.stopWords.addAll(st);
-
             // load the dictionary corpus
             URL dictResource = WordBreakTokenizer.class.getClassLoader().getResource(dict_name);
             List<String> dl = Files.readAllLines(Paths.get(dictResource.toURI()));
@@ -143,7 +146,7 @@ public class WordBreakTokenizer implements Tokenizer {
                     if(map.containsKey(letter)) {
                         prob[start][start] = map.get(letter);
                         List<String> tmp = new ArrayList<>();
-                        if(!sw.stopWords.contains(letter)){
+                        if(!stopWords.contains(letter)){
                             tmp.add(letter);
                         }
                         res.put(start+"-"+start, tmp);
@@ -160,7 +163,7 @@ public class WordBreakTokenizer implements Tokenizer {
                 if(map.containsKey(text.substring(start,end+1))){
                     highest_prob = map.get(text.substring(start,end+1));
                     //System.out.println("Map prob : " + highest_prob);
-                    if(!sw.stopWords.contains(text.substring(start, end + 1))){
+                    if(!stopWords.contains(text.substring(start, end + 1))){
                         tmp.add(text.substring(start, end + 1));
                     }
                 }
