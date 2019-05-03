@@ -19,10 +19,41 @@ import java.util.Iterator;
 import java.util.List;
 
 /**
- * This class manages an disk-based inverted index and all the documents in the inverted index.
+ * Program Logic for document operation:
+ *      Keep an in-memory hashmap buffer to store all the keys and posting list
+ *      While adding document:
+ *          1. insert document to document store
+ *          2. Tokenize the document and analyze it to get a list of word
+ *          3. For each word in the list:
+ *              append it to hashmap with the format <word, current docID> if not exist.
+ *              Otherwise, just append the current DocId to it.
+ *          4. Increase DocID.
+ *      When the DocID reaches the DEFAULT_FLUSH_THRESHOLD -> flush():
+ *          1. DocID = 0;
+ *          2. Create the segment<x> file
+ *          3. Flush it to disk:
+ *              Format: sizeOfDictionary +sizeOfDocument + dictionary(wordLength+word+offset+length) + eachList
+ *          4. Segment number++
+ *          5. Create new document store file based on Segment
+ *      When the number of segment is even -> merge() all:
+ *          1. For segment i from segment 1 to the number of segment
+ *          2. Merge segment i with segment i-1:
+ *              1. Fetch the dictionaries from both segment:
+ *              2. Use two pointers to access key words from dictionaries in order.
+ *              3. If the keywords not equal:
+ *                  Fetch the larger keywords lists to memory, and insert it to the new merged file
+ *              4. If the keywords are equal:
+ *                  Fetch both list and merge them to one, then insert it to the new merged file
+ *              5. Decrease the segment number when finish one pair
  *
- * Please refer to the project 2 wiki page for implementation guidelines.
+ * Program logic for search operation:
+ *       TBC
+ *
+ *
  */
+
+
+
 public class InvertedIndexManager {
 
     /**
