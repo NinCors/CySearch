@@ -13,16 +13,10 @@ public class WordBreakTokenizerTest {
     @Test
     public void test1() {
         String text = "catdog";
-        List<String> expected = Arrays.asList("cat","dog");
+        List<String> expected = Arrays.asList("cat", "dog");
         WordBreakTokenizer tokenizer = new WordBreakTokenizer();
-        assertEquals(expected, tokenizer.tokenize(text));
 
-    }
-    @Test(expected = RuntimeException.class)
-    public void test2() {
-        String text = "apple";
-        WordBreakTokenizer tokenizer = new WordBreakTokenizer();
-        tokenizer.tokenize(text);
+        assertEquals(expected, tokenizer.tokenize(text));
 
     }
 

@@ -6,7 +6,6 @@ import edu.uci.ics.cs221.storage.Document;
 import edu.uci.ics.cs221.storage.DocumentStore;
 import edu.uci.ics.cs221.storage.MapdbDocStore;
 import java.nio.ByteBuffer;
-import java.lang.instrument.Instrumentation;
 import org.checkerframework.checker.units.qual.A;
 
 import java.io.IOException;
@@ -51,18 +50,6 @@ import java.util.*;
  *
  */
 
-/*
-class dictKEY{
-    public int keyLength;
-    public int offset;
-    public int listLength;
-
-    public dictKEY(int keyLength,int offset, int listLength){
-        this.keyLength = keyLength;
-        this.offset = offset;
-        this.listLength = listLength;
-    }
-}*/
 
 
 public class InvertedIndexManager {
@@ -140,6 +127,7 @@ public class InvertedIndexManager {
     public void addDocument(Document document) {
         if(this.docCounter == DEFAULT_FLUSH_THRESHOLD){
             flush();
+            return;
         }
         List<String> words = this.analyzer.analyze(document.getText());
 
@@ -151,9 +139,7 @@ public class InvertedIndexManager {
                 this.SEGMENT_BUFFER.put(word, Arrays.asList(this.docCounter));
             }
         }
-
         this.docCounter++;
-        //TBC
     }
 
     /**
