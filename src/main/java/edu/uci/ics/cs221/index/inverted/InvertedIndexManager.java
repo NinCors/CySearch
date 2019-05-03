@@ -5,6 +5,7 @@ import edu.uci.ics.cs221.analysis.Analyzer;
 import edu.uci.ics.cs221.storage.Document;
 import edu.uci.ics.cs221.storage.DocumentStore;
 import edu.uci.ics.cs221.storage.MapdbDocStore;
+import java.nio.ByteBuffer;
 
 import org.checkerframework.checker.units.qual.A;
 
@@ -40,13 +41,14 @@ public class InvertedIndexManager {
      */
     public static int DEFAULT_MERGE_THRESHOLD = 8;
 
-    private PageFileChannel pageFileChannel;
     private HashMap<String,List<Integer>> SEGMENT_BUFFER;
     private DocumentStore DOCSTORE_BUFFER;
     private Analyzer analyzer;
     private int docCounter;
     private int segmentCounter;
     private String indexFolder;
+
+
 
     private InvertedIndexManager(String indexFolder, Analyzer analyzer) {
         docCounter = 0;
@@ -55,9 +57,8 @@ public class InvertedIndexManager {
             indexFolder += '/';
         }
         this.indexFolder = indexFolder;
-        Path indexFilePath = Paths.get(this.indexFolder+"segment"+segmentCounter+".seg");
-        this.pageFileChannel = PageFileChannel.createOrOpen(indexFilePath);
-        this.DOCSTORE_BUFFER = MapdbDocStore.createOrOpen(this.indexFolder+"doc"+docCounter+".db");
+
+        this.DOCSTORE_BUFFER = MapdbDocStore.createOrOpen(this.indexFolder+"doc"+segmentCounter+".db");
         this.SEGMENT_BUFFER = new HashMap<>();
         this.analyzer = analyzer;
     }
@@ -89,7 +90,11 @@ public class InvertedIndexManager {
      * @param document
      */
     public void addDocument(Document document) {
-        throw new UnsupportedOperationException();
+        this.docCounter++;
+        if(this.docCounter > DEFAULT_FLUSH_THRESHOLD){
+            flush();
+        }
+        //TBC
     }
 
     /**
@@ -97,7 +102,9 @@ public class InvertedIndexManager {
      * flush() writes the segment to disk containing the posting list and the corresponding document store.
      */
     public void flush() {
-        throw new UnsupportedOperationException();
+        Path indexFilePath = Paths.get(this.indexFolder+"segment"+segmentCounter+".seg");
+        PageFileChannel pageFileChannel = PageFileChannel.createOrOpen(indexFilePath);
+
     }
 
     /**
