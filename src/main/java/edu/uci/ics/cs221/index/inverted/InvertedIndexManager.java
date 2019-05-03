@@ -3,12 +3,17 @@ package edu.uci.ics.cs221.index.inverted;
 import com.google.common.base.Preconditions;
 import edu.uci.ics.cs221.analysis.Analyzer;
 import edu.uci.ics.cs221.storage.Document;
+import edu.uci.ics.cs221.storage.DocumentStore;
+import edu.uci.ics.cs221.storage.MapdbDocStore;
+
+import org.checkerframework.checker.units.qual.A;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 
@@ -35,8 +40,26 @@ public class InvertedIndexManager {
      */
     public static int DEFAULT_MERGE_THRESHOLD = 8;
 
+    private PageFileChannel pageFileChannel;
+    private HashMap<String,List<Integer>> SEGMENT_BUFFER;
+    private DocumentStore DOCSTORE_BUFFER;
+    private Analyzer analyzer;
+    private int docCounter;
+    private int segmentCounter;
+    private String indexFolder;
 
     private InvertedIndexManager(String indexFolder, Analyzer analyzer) {
+        docCounter = 0;
+        segmentCounter =0;
+        if(indexFolder.charAt(indexFolder.length()-1) != '/'){
+            indexFolder += '/';
+        }
+        this.indexFolder = indexFolder;
+        Path indexFilePath = Paths.get(this.indexFolder+"segment"+segmentCounter+".seg");
+        this.pageFileChannel = PageFileChannel.createOrOpen(indexFilePath);
+        this.DOCSTORE_BUFFER = MapdbDocStore.createOrOpen(this.indexFolder+"doc"+docCounter+".db");
+        this.SEGMENT_BUFFER = new HashMap<>();
+        this.analyzer = analyzer;
     }
 
     /**
