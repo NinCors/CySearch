@@ -6,7 +6,7 @@ import edu.uci.ics.cs221.storage.Document;
 import edu.uci.ics.cs221.storage.DocumentStore;
 import edu.uci.ics.cs221.storage.MapdbDocStore;
 import java.nio.ByteBuffer;
-
+import java.lang.instrument.Instrumentation;
 import org.checkerframework.checker.units.qual.A;
 
 import java.io.IOException;
@@ -14,9 +14,7 @@ import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.HashMap;
-import java.util.Iterator;
-import java.util.List;
+import java.util.*;
 
 /**
  * Program Logic for document operation:
@@ -35,6 +33,7 @@ import java.util.List;
  *              Format: sizeOfDictionary +sizeOfDocument + dictionary(wordLength+word+offset+length) + eachList
  *          4. Segment number++
  *          5. Create new document store file based on Segment
+ *          6. Clear hashmap
  *      When the number of segment is even -> merge() all:
  *          1. For segment i from segment 1 to the number of segment
  *          2. Merge segment i with segment i-1:
@@ -52,6 +51,18 @@ import java.util.List;
  *
  */
 
+/*
+class dictKEY{
+    public int keyLength;
+    public int offset;
+    public int listLength;
+
+    public dictKEY(int keyLength,int offset, int listLength){
+        this.keyLength = keyLength;
+        this.offset = offset;
+        this.listLength = listLength;
+    }
+}*/
 
 
 public class InvertedIndexManager {
@@ -117,24 +128,86 @@ public class InvertedIndexManager {
 
     /**
      * Adds a document to the inverted index.
+     *     1.Insert document to document store
+     *     2.Tokenize the document and analyze it to get a list of word
+     *     3.For each word in the list:
+     *         Append it to hashmap with the format <word, current docID> if not exist.
+     *         Otherwise, just append the current DocId to it.
+     *     4.Increase DocID.
      * Document should live in a in-memory buffer until `flush()` is called to write the segment to disk.
      * @param document
      */
     public void addDocument(Document document) {
-        this.docCounter++;
-        if(this.docCounter > DEFAULT_FLUSH_THRESHOLD){
+        if(this.docCounter == DEFAULT_FLUSH_THRESHOLD){
             flush();
         }
+        List<String> words = this.analyzer.analyze(document.getText());
+
+        for(String word:words){
+            if(this.SEGMENT_BUFFER.containsKey(word)){
+                this.SEGMENT_BUFFER.get(word).add(this.docCounter);
+            }
+            else{
+                this.SEGMENT_BUFFER.put(word, Arrays.asList(this.docCounter));
+            }
+        }
+
+        this.docCounter++;
         //TBC
     }
 
     /**
      * Flushes all the documents in the in-memory segment buffer to disk. If the buffer is empty, it should not do anything.
      * flush() writes the segment to disk containing the posting list and the corresponding document store.
+     * When the DocID reaches the DEFAULT_FLUSH_THRESHOLD -> flush():
+     *          1. DocID = 0;
+     *          2. Create the segment<x> file
+     *          3. Flush it to disk:
+     *              Format: sizeOfDictionary +sizeOfDocument + dictionary(wordLength+word+offset+length) + eachList
+     *          4. Segment number++
+     *          5. Create new document store file based on Segment
      */
     public void flush() {
+        //Open segment file
         Path indexFilePath = Paths.get(this.indexFolder+"segment"+segmentCounter+".seg");
-        PageFileChannel pageFileChannel = PageFileChannel.createOrOpen(indexFilePath);
+        PageFileChannel segment = PageFileChannel.createOrOpen(indexFilePath);
+        //get sorted key from the segment buffer
+        List<String> keys = new ArrayList<>(this.SEGMENT_BUFFER.keySet());
+        Collections.sort(keys);
+
+        //calculate the estimated size of the dictionary part
+        int dic_size = 8;// sizeofDictionary + DocumentOffset
+        for(String key:keys){
+            dic_size += 12+key.length();//offset,listLength,keyLength+real key;
+        }
+        ByteBuffer dict_part = ByteBuffer.allocate(dic_size);
+        dict_part.putInt(keys.size());
+        dict_part.putInt(dic_size);
+
+        //build the dictionary part
+        for(String key:keys){
+            dict_part.putInt(key.length());
+            dict_part.put(key.getBytes());
+            dict_part.putInt(dic_size);
+            dict_part.putInt(this.SEGMENT_BUFFER.get(key).size()*4);
+        }
+        segment.appendAllBytes(dict_part);
+
+        //Append all the real posting list into disk
+        for(String key:keys){
+            List<Integer> tmp = this.SEGMENT_BUFFER.get(key);
+            ByteBuffer postingList = ByteBuffer.allocate(tmp.size()*4);
+            for(int i: tmp){
+                postingList.putInt(i);
+            }
+            segment.appendAllBytes(postingList);
+        }
+        segment.close();
+
+        this.segmentCounter++;
+        this.DOCSTORE_BUFFER = MapdbDocStore.createOrOpen(this.indexFolder+"doc"+segmentCounter+".db");
+        this.SEGMENT_BUFFER.clear();
+        this.docCounter = 0;
 
     }
 
