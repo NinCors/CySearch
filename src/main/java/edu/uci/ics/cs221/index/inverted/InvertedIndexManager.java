@@ -369,7 +369,7 @@ public class InvertedIndexManager {
         Path indexFilePath = Paths.get(this.indexFolder+"segment"+segmentNum+".seg");
         PageFileChannel segment = PageFileChannel.createOrOpen(indexFilePath);
 
-        Map<String, int[]> dict = new HashMap<>();
+        Map<String, int[]> dict = new LinkedHashMap<>();
         int[] key_info = new int[2];
         ByteBuffer segInfo = segment.readPage(0);
 
@@ -402,17 +402,25 @@ public class InvertedIndexManager {
     public static void main(String[] args) throws Exception {
 
         //Hashmap test
-        HashMap<String, Integer> mt = new HashMap<>();
+        HashMap<String, Integer> mt = new LinkedHashMap<>();
         mt.put("a",1);
         mt.put("c",4);
         mt.put("b",2);
         mt.put("d",3);
 
+        HashMap<String, Integer> mt1 = mt;
 
-        Set<String>set = mt.keySet();
+        Iterator<Map.Entry<String,Integer>> it = mt.entrySet().iterator();
+        while(it.hasNext()){
+            System.out.println(it.next().getKey());
+        }
+
+
+        Set<String>set = mt1.keySet();
         for(String i: set){
             System.out.println(i);
         }
+        System.out.println(mt);
 
 
         //read from byte buffer test
