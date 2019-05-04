@@ -5,9 +5,12 @@ import edu.uci.ics.cs221.analysis.Analyzer;
 import edu.uci.ics.cs221.storage.Document;
 import edu.uci.ics.cs221.storage.DocumentStore;
 import edu.uci.ics.cs221.storage.MapdbDocStore;
+
+import java.io.File;
 import java.nio.ByteBuffer;
 import org.checkerframework.checker.units.qual.A;
 
+import javax.swing.plaf.synth.SynthTextAreaUI;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
@@ -71,7 +74,7 @@ public class InvertedIndexManager {
     public static int DEFAULT_MERGE_THRESHOLD = 8;
 
     private HashMap<String,List<Integer>> SEGMENT_BUFFER;
-    private DocumentStore DOCSTORE_BUFFER;
+    private List<Document> DOCSTORE_BUFFER;
     private Analyzer analyzer;
     private int docCounter;
     private int segmentCounter;
@@ -86,8 +89,7 @@ public class InvertedIndexManager {
             indexFolder += '/';
         }
         this.indexFolder = indexFolder;
-
-        this.DOCSTORE_BUFFER = MapdbDocStore.createOrOpen(this.indexFolder+"doc"+segmentCounter+".db");
+        this.DOCSTORE_BUFFER = new ArrayList<>();
         this.SEGMENT_BUFFER = new HashMap<>();
         this.analyzer = analyzer;
     }
@@ -130,7 +132,7 @@ public class InvertedIndexManager {
             return;
         }
         List<String> words = this.analyzer.analyze(document.getText());
-
+        DOCSTORE_BUFFER.add(document);
         for(String word:words){
             if(this.SEGMENT_BUFFER.containsKey(word)){
                 this.SEGMENT_BUFFER.get(word).add(this.docCounter);
@@ -188,10 +190,18 @@ public class InvertedIndexManager {
             }
             segment.appendAllBytes(postingList);
         }
-        segment.close();
 
+        //write the document store file
+        DocumentStore ds = MapdbDocStore.createOrOpen(this.indexFolder+"doc"+segmentCounter+".db");
+        for(int i = 0; i < this.DOCSTORE_BUFFER.size(); i++){
+            ds.addDocument(i,this.DOCSTORE_BUFFER.get(i));
+        }
+
+        //Ready for next segment
+        segment.close();
+        ds.close();
         this.segmentCounter++;
-        this.DOCSTORE_BUFFER = MapdbDocStore.createOrOpen(this.indexFolder+"doc"+segmentCounter+".db");
+        this.DOCSTORE_BUFFER.clear();
         this.SEGMENT_BUFFER.clear();
         this.docCounter = 0;
 
@@ -199,11 +209,25 @@ public class InvertedIndexManager {
 
     /**
      * Merges all the disk segments of the inverted index pair-wise.
+     *      When the number of segment is even -> merge() all:
+     *          1. For segment i from segment 1 to the number of segment
+     *          2. Merge segment i with segment i-1:
+     *              1. Fetch the dictionaries from both segment:
+     *              2. Use two pointers to access key words from dictionaries in order.
+     *              3. If the keywords not equal:
+     *                  Fetch the larger keywords lists to memory, and insert it to the new merged file
+     *                4. If the keywords are equal:
+     *                    Fetch both list and merge them to one, then insert it to the new merged file
+     *                5. Decrease the segment number when finish one pair
      */
+
     public void mergeAllSegments() {
         // merge only happens at even number of segments
         Preconditions.checkArgument(getNumSegments() % 2 == 0);
-        throw new UnsupportedOperationException();
+        for(int i = 1; i<this.segmentCounter; i++){
+
+        }
+
     }
 
     /**
@@ -246,9 +270,37 @@ public class InvertedIndexManager {
 
     /**
      * Iterates through all the documents in all disk segments.
+     * Program logic:
+     *      1. Scan all the doc file and keep read
+     *
      */
     public Iterator<Document> documentIterator() {
-        throw new UnsupportedOperationException();
+        Iterator<Document> it = new Iterator<Document>() {
+            boolean first = true;
+            Iterator<Integer> key;
+            int cur_seg_num = 0;
+
+            private void init(){
+                File INDEX = new File();
+                if (!INDEX.exists()) {INDEX.mkdirs();}
+            }
+
+            @Override
+            public boolean hasNext() {
+                return false;
+            }
+
+            @Override
+            public Document next() {
+                if(first){
+                    first = false;
+
+                }
+
+                return null;
+            }
+        };
+        return it;
     }
 
     /**
@@ -266,7 +318,13 @@ public class InvertedIndexManager {
      * @return number of index segments.
      */
     public int getNumSegments() {
-        throw new UnsupportedOperationException();
+        File file = new File(this.indexFolder);
+        String[] filelist = file.list();
+        if(this.segmentCounter != (filelist.length/2)){
+            System.out.println("get segment wrong!");
+            return -1;
+        }
+        return this.segmentCounter;
     }
 
     /**
@@ -280,5 +338,29 @@ public class InvertedIndexManager {
         throw new UnsupportedOperationException();
     }
 
+    public static void main(String[] args) throws Exception {
+        //read from byte buffer test
+        ByteBuffer tmp = ByteBuffer.allocate(4096);
+        tmp.putInt(5);
+        tmp.put("hello".getBytes());
+        tmp.putInt(10);
+        tmp.putInt(10);
+
+        ByteBuffer tmp1 = tmp;
+        tmp1.flip();
+        System.out.println(tmp1.getInt());
+        byte[] str = new byte[5];
+        tmp1.get(str);
+        String s = new String(str);
+
+        System.out.println(s);
+        System.out.println(tmp1.getInt());
+        System.out.println(tmp1.getInt());
+        System.out.println(tmp1.capacity());
+
+        // Merge two byte buffer
+        // bb = ByteBuffer.allocate(300).put(bb).put(bb2);
+
+    }
 
 }
