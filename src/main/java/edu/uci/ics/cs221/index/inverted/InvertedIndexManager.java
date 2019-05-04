@@ -78,7 +78,7 @@ public class InvertedIndexManager {
     private Analyzer analyzer;
     private int docCounter;
     private int segmentCounter;
-    private String indexFolder;
+    protected String indexFolder;
 
 
 
@@ -277,26 +277,32 @@ public class InvertedIndexManager {
     public Iterator<Document> documentIterator() {
         Iterator<Document> it = new Iterator<Document>() {
             boolean first = true;
-            Iterator<Integer> key;
+            Iterator<Integer> key = null;
             int cur_seg_num = 0;
+            DocumentStore ds = null;
 
-            private void init(){
-                File INDEX = new File();
-                if (!INDEX.exists()) {INDEX.mkdirs();}
+            private boolean openDoc(){
+                File doc = new File(indexFolder+"doc"+cur_seg_num+".db");
+                if (!doc.exists()) {return false;}
+                this.ds = MapdbDocStore.createOrOpen(indexFolder+"doc"+cur_seg_num+".db");
+                key = ds.keyIterator();
+                this.cur_seg_num++;
+                return true;
             }
 
             @Override
             public boolean hasNext() {
-                return false;
+                if(key == null || !key.hasNext()){
+                    if(!openDoc()){return false;}
+                }
+                return key.hasNext();
             }
 
             @Override
             public Document next() {
-                if(first){
-                    first = false;
-
+                if(hasNext()){
+                    return ds.getDocument(key.next());
                 }
-
                 return null;
             }
         };
@@ -335,28 +341,132 @@ public class InvertedIndexManager {
      * @return in-memory data structure with all contents in the index segment, null if segmentNum don't exist.
      */
     public InvertedIndexSegmentForTest getIndexSegment(int segmentNum) {
-        throw new UnsupportedOperationException();
+        File seg = new File(indexFolder+"segment"+segmentNum+".seg");
+        File doc = new File(indexFolder+"doc"+segmentNum+".db");
+        if (!doc.exists()||!seg.exists()) {return null;}
+
+        Path indexFilePath = Paths.get(this.indexFolder+"segment"+segmentNum+".seg");
+        PageFileChannel segment = PageFileChannel.createOrOpen(indexFilePath);
+
+        ByteBuffer segInfo = ByteBuffer.allocate(8);
+
+        return null;
+    }
+
+    /**
+     * Decode the content of dictionary from segment
+     * Program Logic:
+     *      1. read first page of seg to get segment information
+     *      2. Load all pages that contains the dictionary content into one bytebuffer
+     *      3. Keep extract the key from this bytebuffer until reaches the size of dictionary
+     * @param segmentNum
+     * @return in-memory data structure of dictionary <Key, [offset, length]>
+     */
+
+    public Map<String, int[]> indexDicDecoder(int segmentNum){
+        File seg = new File(this.indexFolder+"segment"+segmentNum+".seg");
+        if(!seg.exists()){return null;}
+        Path indexFilePath = Paths.get(this.indexFolder+"segment"+segmentNum+".seg");
+        PageFileChannel segment = PageFileChannel.createOrOpen(indexFilePath);
+
+        Map<String, int[]> dict = new HashMap<>();
+        int[] key_info = new int[2];
+        ByteBuffer segInfo = segment.readPage(0);
+
+        int key_num = segInfo.getInt();
+        int doc_offset = segInfo.getInt();
+        int page_num = doc_offset/4096;
+
+        ByteBuffer dic_content = ByteBuffer.allocate((page_num+1)*4096).put(segInfo);
+
+        //read all the content of dictionary from disk
+        for(int i =1;i<=page_num;i++){
+            dic_content.put(segment.readPage(i));
+        }
+        dic_content.rewind();
+        //loop through the dic_content to extract key
+        //Format -> <key_length, key, offset, >
+        while(key_num >= 0){
+            int key_length =dic_content.getInt();
+            byte[] str = new byte[key_length];
+            dic_content.get(str);
+            String tmp_key = new String(str);
+            key_info[0] = dic_content.getInt();
+            key_info[1] = dic_content.getInt();
+            dict.put(tmp_key,key_info);
+        }
+
+        return dict;
     }
 
     public static void main(String[] args) throws Exception {
+
+        //Hashmap test
+        HashMap<String, Integer> mt = new HashMap<>();
+        mt.put("a",1);
+        mt.put("c",4);
+        mt.put("b",2);
+        mt.put("d",3);
+
+
+        Set<String>set = mt.keySet();
+        for(String i: set){
+            System.out.println(i);
+        }
+
+
         //read from byte buffer test
-        ByteBuffer tmp = ByteBuffer.allocate(4096);
+        ByteBuffer tmp = ByteBuffer.allocate(17);
         tmp.putInt(5);
         tmp.put("hello".getBytes());
         tmp.putInt(10);
         tmp.putInt(10);
 
-        ByteBuffer tmp1 = tmp;
-        tmp1.flip();
-        System.out.println(tmp1.getInt());
-        byte[] str = new byte[5];
-        tmp1.get(str);
-        String s = new String(str);
 
+        ByteBuffer tmp1 = ByteBuffer.allocate(17);
+        tmp1.putInt(5);
+        tmp1.put("fucke".getBytes());
+        tmp1.putInt(11);
+        tmp1.putInt(12);
+
+        tmp.rewind();
+        tmp.getInt();
+        tmp1.rewind();
+
+        //combine byte buffer test
+        ByteBuffer tmp2 = ByteBuffer.allocate(34);
+        tmp2.put(tmp1);
+        tmp2.put(tmp);
+
+        System.out.println("position"+tmp2.position());
+        System.out.println("limit"+tmp2.limit());
+        tmp2.rewind();
+        System.out.println("position"+tmp2.position());
+        System.out.println("limit"+tmp2.limit());
+
+        System.out.println(tmp2.getInt());
+        byte[] str = new byte[5];
+        tmp2.get(str);
+        String s = new String(str);
         System.out.println(s);
-        System.out.println(tmp1.getInt());
-        System.out.println(tmp1.getInt());
-        System.out.println(tmp1.capacity());
+        System.out.println(tmp2.getInt());
+        System.out.println(tmp2.getInt());
+        System.out.println(tmp2.capacity());
+
+        System.out.println("position"+tmp2.position());
+        System.out.println("limit"+tmp2.limit());
+
+        //System.out.println(tmp2.getInt());
+        byte[] str1 = new byte[5];
+        tmp2.get(str1);
+        String s1 = new String(str1);
+
+        System.out.println(s1);
+        System.out.println(tmp2.getInt());
+        System.out.println(tmp2.getInt());
+        System.out.println(tmp2.capacity());
+        System.out.println("position"+tmp2.position());
+        System.out.println("limit"+tmp2.limit());
 
         // Merge two byte buffer
         // bb = ByteBuffer.allocate(300).put(bb).put(bb2);
