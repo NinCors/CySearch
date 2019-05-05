@@ -178,7 +178,7 @@ public class InvertedIndexManager {
         dict_part.putInt(dic_size);
         System.out.println("Size of dict is : " + dic_size);
 
-        dic_size += (4096 - dic_size%4096);
+        dic_size += (PageFileChannel.PAGE_SIZE - dic_size%PageFileChannel.PAGE_SIZE);
 
         //build the dictionary part
         for(String key:keys){
@@ -192,7 +192,8 @@ public class InvertedIndexManager {
         System.out.println("Disk has page : " + segment.getNumPages());
         System.out.println("Size of whole dictionary is : " + dic_size);
 
-        ByteBuffer page_tmp = ByteBuffer.allocate(4096);
+        ByteBuffer page_tmp = ByteBuffer.allocate(PageFileChannel.PAGE_SIZE);
+
         //Append all the real posting list into disk
         for(String key:keys){
             List<Integer> tmp = this.SEGMENT_BUFFER.get(key);
@@ -202,18 +203,17 @@ public class InvertedIndexManager {
                 postingList.putInt(i);
             }
             postingList.rewind();
-            //System.out.println("Append key-----------------");
-            //System.out.println("Position: "+page_tmp.position());
-            //System.out.println("Capacity: "+page_tmp.capacity());
-            //System.out.println("ListSize: "+list_size);
+            System.out.println("Append key "+key);
+            System.out.println("Position: "+page_tmp.position());
+            System.out.println("Capacity: "+page_tmp.capacity());
+            System.out.println("ListSize: "+list_size);
             if(page_tmp.position()+list_size < page_tmp.capacity()){
-                System.out.println("hellp????");
                 page_tmp.put(postingList);
             }
             else if(page_tmp.position()+list_size == page_tmp.capacity()){
                 page_tmp.put(postingList);
                 segment.appendPage(page_tmp);
-                page_tmp = ByteBuffer.allocate(4096);
+                page_tmp = ByteBuffer.allocate(PageFileChannel.PAGE_SIZE);
             }
             else{
                 /*
@@ -222,40 +222,59 @@ public class InvertedIndexManager {
                         sizeForNextPage = 1000 - 96;
                  */
                 //append the leftside of list into page
-                int sizeForCurPage = (4096 - page_tmp.position());
+
+
+                int sizeForCurPage = (PageFileChannel.PAGE_SIZE - page_tmp.position());
                 postingList.position(0);
                 postingList.limit(sizeForCurPage);
                 page_tmp.put(postingList);
+
+                System.out.println("Special case: sizeForCur->"+sizeForCurPage);
+
                 segment.appendPage(page_tmp);
+                page_tmp = ByteBuffer.allocate(PageFileChannel.PAGE_SIZE);
+
 
                 //re-adjust the posting list
                 postingList.rewind();
                 postingList.position(sizeForCurPage);
 
                 int sizeForNextPage = list_size -sizeForCurPage;
+                System.out.println("Special case: sizeForNext->"+sizeForNextPage);
+
                 while(sizeForNextPage > 0){
-                    int write_size = 4096;
+                    int write_size = PageFileChannel.PAGE_SIZE;
                     if(sizeForNextPage < write_size){
-                        write_size = sizeForCurPage;
+                        write_size = sizeForNextPage;
                     }
-                    postingList.limit(postingList.position()+write_size);
-                    page_tmp = ByteBuffer.allocate(4096);
+                    if(postingList.position()+write_size<postingList.capacity()) {
+                        postingList.limit(postingList.position() + write_size);
+                    }
+                    else{
+                        postingList.limit(postingList.capacity());
+                    }
+                    System.out.println("PostingList: position "+postingList.position()+" Limit "+postingList.limit());
                     page_tmp.put(postingList);
                     if(page_tmp.position()==page_tmp.capacity()){
                         segment.appendPage(page_tmp);
-                        page_tmp = ByteBuffer.allocate(4096);
+                        page_tmp = ByteBuffer.allocate(PageFileChannel.PAGE_SIZE);
                     }
                     postingList.position(postingList.limit());
                     sizeForNextPage -= write_size;
                 }
-
             }
         }
         //If there is any remaining bytes not add into disk
         if(page_tmp.position()>0){
-            System.out.println("WTF");
             segment.appendPage(page_tmp);
+            page_tmp.position(6);
+            page_tmp.limit(16);
         }
+
+
+
+
+
         System.out.println("Disk has page : "+ segment.getNumPages());
 
         //write the document store file
@@ -452,12 +471,12 @@ public class InvertedIndexManager {
             5200/4096 = 1 -> open page 1
             5200%4096 = 1100-> in page 1
          */
-        int startPageNum = keyInfo[0]/4096;
-        int pageOffset = keyInfo[0]%4096;
-        int finishPageNum = startPageNum + (pageOffset + keyInfo[1])/4096;
+        int startPageNum = keyInfo[0]/PageFileChannel.PAGE_SIZE;
+        int pageOffset = keyInfo[0]%PageFileChannel.PAGE_SIZE;
+        int finishPageNum = startPageNum + (pageOffset + keyInfo[1])/PageFileChannel.PAGE_SIZE;
         System.out.println("List: Offset: "+ keyInfo[0] + " Length : "+keyInfo[1]);
         System.out.println("List: StartPage: "+ startPageNum + " pageOffset: "+pageOffset + " finishPageNum" + finishPageNum);
-        ByteBuffer list_buffer = ByteBuffer.allocate((finishPageNum-startPageNum+1)*4096);
+        ByteBuffer list_buffer = ByteBuffer.allocate((finishPageNum-startPageNum+1)*PageFileChannel.PAGE_SIZE);
 
 
         for(int i = startPageNum; i<=finishPageNum;i++){
@@ -495,10 +514,10 @@ public class InvertedIndexManager {
 
         int key_num = segInfo.getInt();
         int doc_offset = segInfo.getInt();
-        int page_num = doc_offset/4096;
+        int page_num = doc_offset/PageFileChannel.PAGE_SIZE;
         System.out.println("KeyNum: "+key_num+" docOffset: "+ doc_offset + " pageNum: "+page_num);
 
-        ByteBuffer dic_content = ByteBuffer.allocate((page_num+1)*4096).put(segInfo);
+        ByteBuffer dic_content = ByteBuffer.allocate((page_num+1)*PageFileChannel.PAGE_SIZE).put(segInfo);
 
         //read all the content of dictionary from disk
         for(int i =1;i<=page_num;i++){
