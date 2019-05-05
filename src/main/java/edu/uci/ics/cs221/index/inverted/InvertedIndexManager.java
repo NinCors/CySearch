@@ -73,8 +73,8 @@ public class InvertedIndexManager {
      */
     public static int DEFAULT_MERGE_THRESHOLD = 8;
 
-    private HashMap<String,List<Integer>> SEGMENT_BUFFER;
-    private List<Document> DOCSTORE_BUFFER;
+    private TreeMap<String,List<Integer>> SEGMENT_BUFFER;
+    private TreeMap<Integer,Document> DOCSTORE_BUFFER;
     private Analyzer analyzer;
     private int docCounter;
     private int segmentCounter;
@@ -89,8 +89,8 @@ public class InvertedIndexManager {
             indexFolder += '/';
         }
         this.indexFolder = indexFolder;
-        this.DOCSTORE_BUFFER = new ArrayList<>();
-        this.SEGMENT_BUFFER = new HashMap<>();
+        this.DOCSTORE_BUFFER = new TreeMap<>();
+        this.SEGMENT_BUFFER = new TreeMap<>();
         this.analyzer = analyzer;
     }
 
@@ -132,7 +132,7 @@ public class InvertedIndexManager {
             return;
         }
         List<String> words = this.analyzer.analyze(document.getText());
-        DOCSTORE_BUFFER.add(document);
+        DOCSTORE_BUFFER.put(this.docCounter, document);
         for(String word:words){
             if(this.SEGMENT_BUFFER.containsKey(word)){
                 this.SEGMENT_BUFFER.get(word).add(this.docCounter);
@@ -160,8 +160,7 @@ public class InvertedIndexManager {
         Path indexFilePath = Paths.get(this.indexFolder+"segment"+segmentCounter+".seg");
         PageFileChannel segment = PageFileChannel.createOrOpen(indexFilePath);
         //get sorted key from the segment buffer
-        List<String> keys = new ArrayList<>(this.SEGMENT_BUFFER.keySet());
-        Collections.sort(keys);
+        Set<String> keys = this.SEGMENT_BUFFER.keySet();
 
         //calculate the estimated size of the dictionary part
         int dic_size = 8;// sizeofDictionary + DocumentOffset
@@ -178,6 +177,7 @@ public class InvertedIndexManager {
             dict_part.put(key.getBytes());
             dict_part.putInt(dic_size);
             dict_part.putInt(this.SEGMENT_BUFFER.get(key).size()*4);
+            dic_size+=this.SEGMENT_BUFFER.get(key).size()*4;
         }
         segment.appendAllBytes(dict_part);
 
@@ -192,10 +192,7 @@ public class InvertedIndexManager {
         }
 
         //write the document store file
-        DocumentStore ds = MapdbDocStore.createOrOpen(this.indexFolder+"doc"+segmentCounter+".db");
-        for(int i = 0; i < this.DOCSTORE_BUFFER.size(); i++){
-            ds.addDocument(i,this.DOCSTORE_BUFFER.get(i));
-        }
+        DocumentStore ds = MapdbDocStore.createWithBulkLoad(this.indexFolder+"doc"+segmentCounter+".db",this.DOCSTORE_BUFFER.entrySet().iterator());
 
         //Ready for next segment
         segment.close();
@@ -345,12 +342,65 @@ public class InvertedIndexManager {
         File doc = new File(indexFolder+"doc"+segmentNum+".db");
         if (!doc.exists()||!seg.exists()) {return null;}
 
+        TreeMap<String,List<Integer>> invertedList = new TreeMap<>();
+        TreeMap<Integer,Document> documents = new TreeMap<>();
+
         Path indexFilePath = Paths.get(this.indexFolder+"segment"+segmentNum+".seg");
         PageFileChannel segment = PageFileChannel.createOrOpen(indexFilePath);
 
-        ByteBuffer segInfo = ByteBuffer.allocate(8);
+        TreeMap<String,int[]> dict = indexDicDecoder(segment);
 
-        return null;
+        for(Map.Entry<String,int[]>entry:dict.entrySet()) {
+            invertedList.put(entry.getKey(), indexListDecoder(entry.getValue(), segment));
+        }
+
+        segment.close();
+
+        DocumentStore ds = MapdbDocStore.createOrOpen(indexFolder+"doc"+segmentNum+".db");
+        Iterator<Map.Entry<Integer,Document>> it = ds.iterator();
+
+        while(it.hasNext()){
+            Map.Entry<Integer,Document> entry =it.next();
+            documents.put(entry.getKey(),entry.getValue());
+        }
+
+        InvertedIndexSegmentForTest test = new InvertedIndexSegmentForTest(invertedList,documents);
+        return test;
+    }
+
+
+    /**
+     * Decode one posting list from segment file based on the dictionary information <offset, length>
+     * Program logic:
+     *
+     * @param keyInfo -> [offset, length]
+     * @param segment
+     * @return
+     */
+
+
+    public List<Integer> indexListDecoder(int[] keyInfo, PageFileChannel segment){
+        /*
+            eg. Offset 5200 length 1000
+            list_buffer = allocate(1000);
+            5200/4096 = 1 -> open page 1
+            5200%4096 = 1100-> in page 1
+         */
+        int startPageNum = keyInfo[0]/4096;
+        int pageOffset = keyInfo[0]/4096;
+        int finishPageNum = startPageNum + (pageOffset + keyInfo[0])/4096;
+        ByteBuffer list_buffer = ByteBuffer.allocate((finishPageNum-startPageNum+1)*4096);
+
+        for(int i = startPageNum; i<=finishPageNum;i++){
+            list_buffer.put(segment.readPage(i));
+        }
+        list_buffer.position(pageOffset);
+        List<Integer>res = new ArrayList<>();
+        for(int i = 0; i<=keyInfo[1]-4;i+=4){
+            res.add(list_buffer.getInt());
+        }
+
+        return res;
     }
 
     /**
@@ -359,17 +409,19 @@ public class InvertedIndexManager {
      *      1. read first page of seg to get segment information
      *      2. Load all pages that contains the dictionary content into one bytebuffer
      *      3. Keep extract the key from this bytebuffer until reaches the size of dictionary
-     * @param segmentNum
+     * @param segment
      * @return in-memory data structure of dictionary <Key, [offset, length]>
      */
 
-    public Map<String, int[]> indexDicDecoder(int segmentNum){
+    public TreeMap<String, int[]> indexDicDecoder(PageFileChannel segment){
+        /*
         File seg = new File(this.indexFolder+"segment"+segmentNum+".seg");
         if(!seg.exists()){return null;}
         Path indexFilePath = Paths.get(this.indexFolder+"segment"+segmentNum+".seg");
         PageFileChannel segment = PageFileChannel.createOrOpen(indexFilePath);
+        */
 
-        Map<String, int[]> dict = new LinkedHashMap<>();
+        TreeMap<String, int[]> dict = new TreeMap<>();
         int[] key_info = new int[2];
         ByteBuffer segInfo = segment.readPage(0);
 
@@ -385,7 +437,7 @@ public class InvertedIndexManager {
         }
         dic_content.rewind();
         //loop through the dic_content to extract key
-        //Format -> <key_length, key, offset, >
+        //Format -> <key_length, key, offset, length>
         while(key_num >= 0){
             int key_length =dic_content.getInt();
             byte[] str = new byte[key_length];
@@ -402,23 +454,23 @@ public class InvertedIndexManager {
     public static void main(String[] args) throws Exception {
 
         //Hashmap test
-        HashMap<String, Integer> mt = new LinkedHashMap<>();
+        TreeMap<String, Integer> mt = new TreeMap<>();
         mt.put("a",1);
         mt.put("c",4);
         mt.put("b",2);
         mt.put("d",3);
 
-        HashMap<String, Integer> mt1 = mt;
+        TreeMap<String, Integer> mt1 = mt;
 
         Iterator<Map.Entry<String,Integer>> it = mt.entrySet().iterator();
         while(it.hasNext()){
-            System.out.println(it.next().getKey());
+            System.out.println(it.next().toString());
         }
 
 
         Set<String>set = mt1.keySet();
         for(String i: set){
-            System.out.println(i);
+            //System.out.println(i);
         }
         System.out.println(mt);
 
@@ -438,7 +490,7 @@ public class InvertedIndexManager {
         tmp1.putInt(12);
 
         tmp.rewind();
-        tmp.getInt();
+        //tmp.getInt();
         tmp1.rewind();
 
         //combine byte buffer test
@@ -451,7 +503,7 @@ public class InvertedIndexManager {
         tmp2.rewind();
         System.out.println("position"+tmp2.position());
         System.out.println("limit"+tmp2.limit());
-
+        tmp2.position(17);
         System.out.println(tmp2.getInt());
         byte[] str = new byte[5];
         tmp2.get(str);
@@ -464,7 +516,9 @@ public class InvertedIndexManager {
         System.out.println("position"+tmp2.position());
         System.out.println("limit"+tmp2.limit());
 
-        //System.out.println(tmp2.getInt());
+        tmp2.position(0);
+
+        System.out.println(tmp2.getInt());
         byte[] str1 = new byte[5];
         tmp2.get(str1);
         String s1 = new String(str1);
