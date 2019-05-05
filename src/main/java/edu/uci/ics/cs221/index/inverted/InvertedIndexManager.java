@@ -1,6 +1,7 @@
 package edu.uci.ics.cs221.index.inverted;
 
 import com.google.common.base.Preconditions;
+import com.sun.jdi.request.MethodEntryRequest;
 import edu.uci.ics.cs221.analysis.Analyzer;
 import edu.uci.ics.cs221.storage.Document;
 import edu.uci.ics.cs221.storage.DocumentStore;
@@ -15,6 +16,7 @@ import javax.print.Doc;
 import javax.swing.plaf.synth.SynthTextAreaUI;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -129,10 +131,7 @@ public class InvertedIndexManager {
      * @param document
      */
     public void addDocument(Document document) {
-        if(this.docCounter == DEFAULT_FLUSH_THRESHOLD){
-            flush();
-            return;
-        }
+
         List<String> words = this.analyzer.analyze(document.getText());
         DOCSTORE_BUFFER.put(this.docCounter, document);
         for(String word:words){
@@ -146,6 +145,10 @@ public class InvertedIndexManager {
             }
         }
         this.docCounter++;
+        if(this.docCounter == DEFAULT_FLUSH_THRESHOLD){
+            flush();
+            return;
+        }
     }
 
     /**
@@ -160,8 +163,8 @@ public class InvertedIndexManager {
      *          5. Create new document store file based on Segment
      */
     public void flush() {
-        System.out.println(this.SEGMENT_BUFFER);
-        System.out.println(this.DOCSTORE_BUFFER);
+        //System.out.println(this.SEGMENT_BUFFER);
+        //System.out.println(this.DOCSTORE_BUFFER);
 
         //Open segment file
         Path indexFilePath = Paths.get(this.indexFolder+"segment"+segmentCounter+".seg");
@@ -172,26 +175,26 @@ public class InvertedIndexManager {
         //calculate the estimated size of the dictionary part
         int dic_size = 8;// sizeofDictionary + DocumentOffset
         for(String key:keys){
-            dic_size += 12+key.length();//offset,listLength,keyLength+real key;
+            dic_size += (12+key.getBytes(StandardCharsets.UTF_8).length);//offset,listLength,keyLength+real key;
         }
-        ByteBuffer dict_part = ByteBuffer.allocate(dic_size);
+        ByteBuffer dict_part = ByteBuffer.allocate(dic_size+PageFileChannel.PAGE_SIZE - dic_size%PageFileChannel.PAGE_SIZE);
         dict_part.putInt(keys.size());
         dict_part.putInt(dic_size);
-        System.out.println("Size of dict is : " + dic_size);
+        //System.out.println("Size of dict is : " + dic_size);
 
         dic_size += (PageFileChannel.PAGE_SIZE - dic_size%PageFileChannel.PAGE_SIZE);
 
         //build the dictionary part
         for(String key:keys){
-            dict_part.putInt(key.length());
-            dict_part.put(key.getBytes());
+            dict_part.putInt(key.getBytes(StandardCharsets.UTF_8).length);
+            dict_part.put(key.getBytes(StandardCharsets.UTF_8));
             dict_part.putInt(dic_size);
             dict_part.putInt(this.SEGMENT_BUFFER.get(key).size()*4);
             dic_size+=this.SEGMENT_BUFFER.get(key).size()*4;
         }
         segment.appendAllBytes(dict_part);
-        System.out.println("Disk has page : " + segment.getNumPages());
-        System.out.println("Size of whole dictionary is : " + dic_size);
+        //System.out.println("Disk has page : " + segment.getNumPages());
+        //System.out.println("Size of whole dictionary is : " + dic_size);
 
         ByteBuffer page_tmp = ByteBuffer.allocate(PageFileChannel.PAGE_SIZE);
 
@@ -204,10 +207,10 @@ public class InvertedIndexManager {
                 postingList.putInt(i);
             }
             postingList.rewind();
-            System.out.println("Append key "+key);
-            System.out.println("Position: "+page_tmp.position());
-            System.out.println("Capacity: "+page_tmp.capacity());
-            System.out.println("ListSize: "+list_size);
+            //System.out.println("Append key "+key);
+            //System.out.println("Position: "+page_tmp.position());
+            //System.out.println("Capacity: "+page_tmp.capacity());
+            //System.out.println("ListSize: "+list_size);
             if(page_tmp.position()+list_size < page_tmp.capacity()){
                 page_tmp.put(postingList);
             }
@@ -230,7 +233,7 @@ public class InvertedIndexManager {
                 postingList.limit(sizeForCurPage);
                 page_tmp.put(postingList);
 
-                System.out.println("Special case: sizeForCur->"+sizeForCurPage);
+                //System.out.println("Special case: sizeForCur->"+sizeForCurPage);
 
                 segment.appendPage(page_tmp);
                 page_tmp = ByteBuffer.allocate(PageFileChannel.PAGE_SIZE);
@@ -241,7 +244,7 @@ public class InvertedIndexManager {
                 postingList.position(sizeForCurPage);
 
                 int sizeForNextPage = list_size -sizeForCurPage;
-                System.out.println("Special case: sizeForNext->"+sizeForNextPage);
+                //System.out.println("Special case: sizeForNext->"+sizeForNextPage);
 
                 while(sizeForNextPage > 0){
                     int write_size = PageFileChannel.PAGE_SIZE;
@@ -254,7 +257,7 @@ public class InvertedIndexManager {
                     else{
                         postingList.limit(postingList.capacity());
                     }
-                    System.out.println("PostingList: position "+postingList.position()+" Limit "+postingList.limit());
+                    //System.out.println("PostingList: position "+postingList.position()+" Limit "+postingList.limit());
                     page_tmp.put(postingList);
                     if(page_tmp.position()==page_tmp.capacity()){
                         segment.appendPage(page_tmp);
@@ -270,7 +273,7 @@ public class InvertedIndexManager {
             segment.appendPage(page_tmp);
         }
 
-        System.out.println("Disk has page : "+ segment.getNumPages());
+        //System.out.println("Disk has page : "+ segment.getNumPages());
 
         //write the document store file
         DocumentStore ds = MapdbDocStore.createWithBulkLoad(this.indexFolder+"doc"+this.segmentCounter+".db",this.DOCSTORE_BUFFER.entrySet().iterator());
@@ -290,27 +293,31 @@ public class InvertedIndexManager {
     }
 
 
-    public void updateSegementDocFile(int segNum){
+    public void updateSegementDocFile(int segNum, int mergedSegId){
         File doc_f1 = new File(this.indexFolder+"doc"+segNum+".db");
         File doc_f2 = new File(this.indexFolder+"doc"+(segNum+1)+".db");
         if(!doc_f1.delete() || !doc_f2.delete()){
-            System.out.println("Can't delete old doc!");
+            throw new UnsupportedOperationException();
+            //System.out.println("Can't delete old doc!");
         }
         File doc_f3 = new File(this.indexFolder+"doc"+segNum+"_tmp"+".db");
-        File doc_f4 = new File(this.indexFolder+"doc"+segNum+".db");
+        File doc_f4 = new File(this.indexFolder+"doc"+mergedSegId+".db");
         if(!doc_f3.renameTo(doc_f4)){
-            System.out.println("Can't rename the new doc!");
+            throw new UnsupportedOperationException();
+            //System.out.println("Can't rename the new doc!");
         }
 
         File f1 = new File(this.indexFolder+"segment"+segNum+".seg");
         File f2 = new File(this.indexFolder+"segment"+(segNum+1)+".seg");
         if(!f1.delete() || !f2.delete()){
-            System.out.println("Can't delete old segment!");
+            throw new UnsupportedOperationException();
+            //System.out.println("Can't delete old segment!");
         }
         File f3 = new File(this.indexFolder+"segment"+segNum+"_tmp"+".seg");
-        File f4 = new File(this.indexFolder+"segment"+segNum+".seg");
+        File f4 = new File(this.indexFolder+"segment"+mergedSegId+".seg");
         if(!f3.renameTo(f4)){
-            System.out.println("Can't rename the new segment!");
+            throw new UnsupportedOperationException();
+            //System.out.println("Can't rename the new segment!");
         }
     }
 
@@ -328,8 +335,8 @@ public class InvertedIndexManager {
      *                5. Decrease the segment number when finish one pair
      */
 
-    public void mergeAndflush(int segNum1,int segNum2){
-        System.out.println("Start merge------------------------------------------");
+    public void mergeAndflush(int segNum1,int segNum2,int mergedSegId){
+        //System.out.println("Start merge------------------------------------------");
         //Open two local Doc file to merge
         DocumentStore ds1 = MapdbDocStore.createOrOpen(this.indexFolder+"doc"+segNum1+".db");
         DocumentStore ds2 = MapdbDocStore.createOrOpen(this.indexFolder+"doc"+segNum2+".db");
@@ -382,8 +389,8 @@ public class InvertedIndexManager {
         //Build the dictionary part
         int sizeOfDictionary = 0;
         int offset = seg1_offset+seg2_offset-8;
-        ByteBuffer dict_part = ByteBuffer.allocate(offset);
-        System.out.println("Budild head_part");
+        ByteBuffer dict_part = ByteBuffer.allocate(offset+PageFileChannel.PAGE_SIZE - offset%PageFileChannel.PAGE_SIZE);
+        //System.out.println("Budild head_part");
 
         //build merged map
         for(Map.Entry<String,int[]>entry:dict1.entrySet()) {
@@ -417,10 +424,10 @@ public class InvertedIndexManager {
         dict_part.putInt(offset);
 
         offset += (PageFileChannel.PAGE_SIZE - offset%PageFileChannel.PAGE_SIZE);
-        System.out.println("nUM KEY"+sizeOfDictionary+"!!!!!!!!!!!merged map is : " +merged_dict.toString());
+        //System.out.println("nUM KEY"+sizeOfDictionary+"!!!!!!!!!!!merged map is : " +merged_dict.toString());
         for(Map.Entry<String,List<int[]>> entry:merged_dict.entrySet()){
-            dict_part.putInt(entry.getKey().length());
-            dict_part.put(entry.getKey().getBytes());
+            dict_part.putInt(entry.getKey().getBytes(StandardCharsets.UTF_8).length);
+            dict_part.put(entry.getKey().getBytes(StandardCharsets.UTF_8));
             dict_part.putInt(offset);
             //compute the length of new list
             int len = 0;
@@ -431,7 +438,7 @@ public class InvertedIndexManager {
             offset += len;
         }
         merged_segement.appendAllBytes(dict_part);
-        System.out.println("Finish head_part");
+        //System.out.println("Finish head_part");
 
         //keep write all the posting list to the disk
         ByteBuffer page_tmp = ByteBuffer.allocate(PageFileChannel.PAGE_SIZE);
@@ -466,7 +473,7 @@ public class InvertedIndexManager {
                 postingList.limit(sizeForCurPage);
                 page_tmp.put(postingList);
 
-                System.out.println("Special case: sizeForCur->" + sizeForCurPage);
+                //System.out.println("Special case: sizeForCur->" + sizeForCurPage);
 
                 merged_segement.appendPage(page_tmp);
                 page_tmp = ByteBuffer.allocate(PageFileChannel.PAGE_SIZE);
@@ -477,7 +484,7 @@ public class InvertedIndexManager {
                 postingList.position(sizeForCurPage);
 
                 int sizeForNextPage = list_size - sizeForCurPage;
-                System.out.println("Special case: sizeForNext->" + sizeForNextPage);
+                //System.out.println("Special case: sizeForNext->" + sizeForNextPage);
 
                 while (sizeForNextPage > 0) {
                     int write_size = PageFileChannel.PAGE_SIZE;
@@ -489,7 +496,7 @@ public class InvertedIndexManager {
                     } else {
                         postingList.limit(postingList.capacity());
                     }
-                    System.out.println("PostingList: position " + postingList.position() + " Limit " + postingList.limit());
+                    //System.out.println("PostingList: position " + postingList.position() + " Limit " + postingList.limit());
                     page_tmp.put(postingList);
                     if (page_tmp.position() == page_tmp.capacity()) {
                         merged_segement.appendPage(page_tmp);
@@ -500,16 +507,16 @@ public class InvertedIndexManager {
                 }
             }
         }
-        System.out.println("Finish listpart");
+        //System.out.println("Finish listpart");
 
         //If there is any remaining bytes not add into disk
         if(page_tmp.position()>0){
             merged_segement.appendPage(page_tmp);
         }
 
-        updateSegementDocFile(segNum1);
+        updateSegementDocFile(segNum1,mergedSegId);
         this.segmentCounter--;
-        System.out.println("Finish merge");
+        //System.out.println("Finish merge");
 
     }
 
@@ -517,8 +524,12 @@ public class InvertedIndexManager {
     public void mergeAllSegments() {
         // merge only happens at even number of segments
         Preconditions.checkArgument(getNumSegments() % 2 == 0);
-        for(int i = 1; i<this.segmentCounter; i++){
-            mergeAndflush(i-1,i);
+        int mergedSegId = 0;
+        //System.out.println("!!!!!!!Total segemetns :" + this.segmentCounter);
+        int totalSeg = this.segmentCounter;
+        for(int i = 1; i<totalSeg; i+=2){
+            mergeAndflush(i-1,i,mergedSegId);
+            mergedSegId++;
         }
     }
 
@@ -621,7 +632,7 @@ public class InvertedIndexManager {
         File file = new File(this.indexFolder);
         String[] filelist = file.list();
         if(this.segmentCounter != (filelist.length/2)){
-            System.out.println("get segment wrong!");
+            //System.out.println("get segment wrong!");
             return -1;
         }
         return this.segmentCounter;
@@ -685,8 +696,8 @@ public class InvertedIndexManager {
         int startPageNum = keyInfo[0]/PageFileChannel.PAGE_SIZE;
         int pageOffset = keyInfo[0]%PageFileChannel.PAGE_SIZE;
         int finishPageNum = startPageNum + (pageOffset + keyInfo[1])/PageFileChannel.PAGE_SIZE;
-        System.out.println("List: Offset: "+ keyInfo[0] + " Length : "+keyInfo[1]);
-        System.out.println("List: StartPage: "+ startPageNum + " pageOffset: "+pageOffset + " finishPageNum" + finishPageNum);
+        //System.out.println("List: Offset: "+ keyInfo[0] + " Length : "+keyInfo[1]);
+        //System.out.println("List: StartPage: "+ startPageNum + " pageOffset: "+pageOffset + " finishPageNum" + finishPageNum);
         ByteBuffer list_buffer = ByteBuffer.allocate((finishPageNum-startPageNum+1)*PageFileChannel.PAGE_SIZE);
 
 
@@ -726,7 +737,7 @@ public class InvertedIndexManager {
         int key_num = segInfo.getInt();
         int doc_offset = segInfo.getInt();
         int page_num = doc_offset/PageFileChannel.PAGE_SIZE;
-        System.out.println("KeyNum: "+key_num+" docOffset: "+ doc_offset + " pageNum: "+page_num);
+        //System.out.println("KeyNum: "+key_num+" docOffset: "+ doc_offset + " pageNum: "+page_num);
 
         ByteBuffer dic_content = ByteBuffer.allocate((page_num+1)*PageFileChannel.PAGE_SIZE).put(segInfo);
 
@@ -739,16 +750,16 @@ public class InvertedIndexManager {
         //Format -> <key_length, key, offset, length>
         while(key_num > 0){
             int key_length =dic_content.getInt();
-            System.out.println("Read: keyLength: "+ key_length);
+            //System.out.println("Read: keyLength: "+ key_length);
             byte[] str = new byte[key_length];
             dic_content.get(str);
-            String tmp_key = new String(str);
-            System.out.println("Read: Key: "+ tmp_key);
+            String tmp_key = new String(str,StandardCharsets.UTF_8);
+            //System.out.println("Read: Key: "+ tmp_key);
             int[] key_info = new int[3];
             key_info[0] = dic_content.getInt();
-            System.out.println("Read: Offset: "+ key_info[0]);
+            //System.out.println("Read: Offset: "+ key_info[0]);
             key_info[1] = dic_content.getInt();
-            System.out.println("Read: Length: "+ key_info[1]);
+            //System.out.println("Read: Length: "+ key_info[1]);
             dict.put(tmp_key,key_info);
             key_num--;
         }
@@ -791,9 +802,12 @@ public class InvertedIndexManager {
         tmp.putInt(10);
         tmp.putInt(10);
 
-        ByteBuffer tmp1 = ByteBuffer.allocate(17);
-        tmp1.putInt(5);
-        tmp1.put("fucke".getBytes());
+        String asd = "fuck’";
+        System.out.println("size of asd "+ asd.getBytes(StandardCharsets.UTF_8).length);
+        ByteBuffer tmp1 = ByteBuffer.allocate(12 + asd.getBytes(StandardCharsets.UTF_8).length);
+
+        tmp1.putInt(asd.length());
+        tmp1.put(asd.getBytes(StandardCharsets.UTF_8));
         tmp1.putInt(11);
         tmp1.putInt(12);
 
@@ -802,7 +816,7 @@ public class InvertedIndexManager {
         tmp1.rewind();
 
         //combine byte buffer test
-        ByteBuffer tmp2 = ByteBuffer.allocate(34);
+        ByteBuffer tmp2 = ByteBuffer.allocate(4096);
         tmp2.put(tmp1);
         tmp2.put(tmp);
 
@@ -811,11 +825,11 @@ public class InvertedIndexManager {
         tmp2.rewind();
         System.out.println("position"+tmp2.position());
         System.out.println("limit"+tmp2.limit());
-        tmp2.position(17);
+
         System.out.println(tmp2.getInt());
-        byte[] str = new byte[5];
+        byte[] str = new byte[asd.getBytes(StandardCharsets.UTF_8).length];
         tmp2.get(str);
-        String s = new String(str);
+        String s = new String(str, StandardCharsets.UTF_8);;
         System.out.println(s);
         System.out.println(tmp2.getInt());
         System.out.println(tmp2.getInt());
@@ -823,8 +837,6 @@ public class InvertedIndexManager {
 
         System.out.println("position"+tmp2.position());
         System.out.println("limit"+tmp2.limit());
-
-        tmp2.position(0);
 
         System.out.println(tmp2.getInt());
         byte[] str1 = new byte[5];
@@ -875,8 +887,7 @@ public class InvertedIndexManager {
 
 
     public static void main(String[] args) throws Exception {
-        loopBytebufferTest();
-
+        readAddBytefferTest();
     }
 
 }
