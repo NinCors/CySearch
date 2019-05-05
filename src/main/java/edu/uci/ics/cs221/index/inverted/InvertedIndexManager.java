@@ -138,7 +138,9 @@ public class InvertedIndexManager {
                 this.SEGMENT_BUFFER.get(word).add(this.docCounter);
             }
             else{
-                this.SEGMENT_BUFFER.put(word, Arrays.asList(this.docCounter));
+                List<Integer> tmp = new ArrayList<>();
+                tmp.add(this.docCounter);
+                this.SEGMENT_BUFFER.put(word, tmp);
             }
         }
         this.docCounter++;
@@ -156,6 +158,9 @@ public class InvertedIndexManager {
      *          5. Create new document store file based on Segment
      */
     public void flush() {
+        System.out.println(this.SEGMENT_BUFFER);
+        System.out.println(this.DOCSTORE_BUFFER);
+
         //Open segment file
         Path indexFilePath = Paths.get(this.indexFolder+"segment"+segmentCounter+".seg");
         PageFileChannel segment = PageFileChannel.createOrOpen(indexFilePath);
@@ -170,6 +175,9 @@ public class InvertedIndexManager {
         ByteBuffer dict_part = ByteBuffer.allocate(dic_size);
         dict_part.putInt(keys.size());
         dict_part.putInt(dic_size);
+        System.out.println("Size of dict is : " + dic_size);
+
+        dic_size += (4096 - dic_size%4096);
 
         //build the dictionary part
         for(String key:keys){
@@ -180,15 +188,56 @@ public class InvertedIndexManager {
             dic_size+=this.SEGMENT_BUFFER.get(key).size()*4;
         }
         segment.appendAllBytes(dict_part);
+        System.out.println("Size of whole dictionary is : " + dic_size);
 
+        ByteBuffer page_tmp = ByteBuffer.allocate(4096);
         //Append all the real posting list into disk
         for(String key:keys){
             List<Integer> tmp = this.SEGMENT_BUFFER.get(key);
-            ByteBuffer postingList = ByteBuffer.allocate(tmp.size()*4);
+            int list_size = tmp.size()*4;
+            ByteBuffer postingList = ByteBuffer.allocate(list_size);
             for(int i: tmp){
                 postingList.putInt(i);
             }
-            segment.appendAllBytes(postingList);
+            if(page_tmp.position()+list_size < page_tmp.capacity()){
+                page_tmp.put(postingList);
+            }
+            else if(page_tmp.position()+list_size == page_tmp.capacity()){
+                page_tmp.put(postingList);
+                segment.appendPage(page_tmp);
+                page_tmp = ByteBuffer.allocate(4096);
+            }
+            else{
+                /*
+                    eg. Current page has 4000 bytes, need add list with 1000 bytes
+                        sizeForCurPage = 4096 - 4000%4096 = 96
+                        sizeForNextPage = 1000 - 96;
+                 */
+                //append the leftside of list into page
+                int sizeForCurPage = (4096 - page_tmp.position());
+                postingList.position(0);
+                postingList.limit(sizeForCurPage);
+                page_tmp.put(postingList);
+                segment.appendPage(page_tmp);
+
+                //re-adjust the posting list
+                postingList.rewind();
+                postingList.position(sizeForCurPage);
+
+                int sizeForNextPage = list_size -sizeForCurPage;
+                while(sizeForNextPage > 0){
+                    int write_size = 4096;
+                    if(sizeForNextPage < write_size){
+                        write_size = sizeForCurPage;
+                    }
+                    postingList.limit(postingList.position()+write_size);
+                    page_tmp = ByteBuffer.allocate(4096);
+                    page_tmp.put(postingList);
+                    postingList.position(postingList.limit());
+                    sizeForNextPage -= write_size;
+                }
+
+            }
         }
 
         //write the document store file
@@ -428,6 +477,7 @@ public class InvertedIndexManager {
         int key_num = segInfo.getInt();
         int doc_offset = segInfo.getInt();
         int page_num = doc_offset/4096;
+        System.out.println("KeyNum: "+key_num+" docOffset: "+ doc_offset + " pageNum: "+page_num);
 
         ByteBuffer dic_content = ByteBuffer.allocate((page_num+1)*4096).put(segInfo);
 
@@ -438,21 +488,29 @@ public class InvertedIndexManager {
         dic_content.rewind();
         //loop through the dic_content to extract key
         //Format -> <key_length, key, offset, length>
-        while(key_num >= 0){
+        while(key_num > 0){
             int key_length =dic_content.getInt();
+            System.out.println("Read: keyLength: "+ key_length);
             byte[] str = new byte[key_length];
             dic_content.get(str);
             String tmp_key = new String(str);
+            System.out.println("Read: Key: "+ tmp_key);
             key_info[0] = dic_content.getInt();
+            System.out.println("Read: Offset: "+ key_info[0]);
             key_info[1] = dic_content.getInt();
+            System.out.println("Read: Length: "+ key_info[1]);
             dict.put(tmp_key,key_info);
+            key_num--;
         }
 
         return dict;
     }
 
-    public static void main(String[] args) throws Exception {
+    /**
+     * Test Functions---------------------------------------------------------
+     */
 
+    public void hashMapTest(){
         //Hashmap test
         TreeMap<String, Integer> mt = new TreeMap<>();
         mt.put("a",1);
@@ -473,15 +531,15 @@ public class InvertedIndexManager {
             //System.out.println(i);
         }
         System.out.println(mt);
+    }
 
-
+    public void readAddBytefferTest(){
         //read from byte buffer test
         ByteBuffer tmp = ByteBuffer.allocate(17);
         tmp.putInt(5);
         tmp.put("hello".getBytes());
         tmp.putInt(10);
         tmp.putInt(10);
-
 
         ByteBuffer tmp1 = ByteBuffer.allocate(17);
         tmp1.putInt(5);
@@ -532,6 +590,24 @@ public class InvertedIndexManager {
 
         // Merge two byte buffer
         // bb = ByteBuffer.allocate(300).put(bb).put(bb2);
+
+    }
+
+    public void loopBytebufferTest(){
+        ByteBuffer tmp = ByteBuffer.allocate(16);
+        tmp.putInt(5);
+        tmp.putInt(6);
+        tmp.putInt(7);
+        tmp.putInt(8);
+    }
+
+
+    public static void main(String[] args) throws Exception {
+
+
+
+
+
 
     }
 
