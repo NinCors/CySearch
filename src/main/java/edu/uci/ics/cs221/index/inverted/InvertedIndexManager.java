@@ -9,6 +9,7 @@ import edu.uci.ics.cs221.storage.MapdbDocStore;
 import java.io.File;
 import java.nio.ByteBuffer;
 import org.checkerframework.checker.units.qual.A;
+import org.omg.Messaging.SYNC_WITH_TRANSPORT;
 
 import javax.swing.plaf.synth.SynthTextAreaUI;
 import java.io.IOException;
@@ -188,6 +189,7 @@ public class InvertedIndexManager {
             dic_size+=this.SEGMENT_BUFFER.get(key).size()*4;
         }
         segment.appendAllBytes(dict_part);
+        System.out.println("Disk has page : " + segment.getNumPages());
         System.out.println("Size of whole dictionary is : " + dic_size);
 
         ByteBuffer page_tmp = ByteBuffer.allocate(4096);
@@ -199,7 +201,13 @@ public class InvertedIndexManager {
             for(int i: tmp){
                 postingList.putInt(i);
             }
+            postingList.rewind();
+            //System.out.println("Append key-----------------");
+            //System.out.println("Position: "+page_tmp.position());
+            //System.out.println("Capacity: "+page_tmp.capacity());
+            //System.out.println("ListSize: "+list_size);
             if(page_tmp.position()+list_size < page_tmp.capacity()){
+                System.out.println("hellp????");
                 page_tmp.put(postingList);
             }
             else if(page_tmp.position()+list_size == page_tmp.capacity()){
@@ -233,12 +241,22 @@ public class InvertedIndexManager {
                     postingList.limit(postingList.position()+write_size);
                     page_tmp = ByteBuffer.allocate(4096);
                     page_tmp.put(postingList);
+                    if(page_tmp.position()==page_tmp.capacity()){
+                        segment.appendPage(page_tmp);
+                        page_tmp = ByteBuffer.allocate(4096);
+                    }
                     postingList.position(postingList.limit());
                     sizeForNextPage -= write_size;
                 }
 
             }
         }
+        //If there is any remaining bytes not add into disk
+        if(page_tmp.position()>0){
+            System.out.println("WTF");
+            segment.appendPage(page_tmp);
+        }
+        System.out.println("Disk has page : "+ segment.getNumPages());
 
         //write the document store file
         DocumentStore ds = MapdbDocStore.createWithBulkLoad(this.indexFolder+"doc"+segmentCounter+".db",this.DOCSTORE_BUFFER.entrySet().iterator());
@@ -398,7 +416,6 @@ public class InvertedIndexManager {
         PageFileChannel segment = PageFileChannel.createOrOpen(indexFilePath);
 
         TreeMap<String,int[]> dict = indexDicDecoder(segment);
-
         for(Map.Entry<String,int[]>entry:dict.entrySet()) {
             invertedList.put(entry.getKey(), indexListDecoder(entry.getValue(), segment));
         }
@@ -436,9 +453,12 @@ public class InvertedIndexManager {
             5200%4096 = 1100-> in page 1
          */
         int startPageNum = keyInfo[0]/4096;
-        int pageOffset = keyInfo[0]/4096;
-        int finishPageNum = startPageNum + (pageOffset + keyInfo[0])/4096;
+        int pageOffset = keyInfo[0]%4096;
+        int finishPageNum = startPageNum + (pageOffset + keyInfo[1])/4096;
+        System.out.println("List: Offset: "+ keyInfo[0] + " Length : "+keyInfo[1]);
+        System.out.println("List: StartPage: "+ startPageNum + " pageOffset: "+pageOffset + " finishPageNum" + finishPageNum);
         ByteBuffer list_buffer = ByteBuffer.allocate((finishPageNum-startPageNum+1)*4096);
+
 
         for(int i = startPageNum; i<=finishPageNum;i++){
             list_buffer.put(segment.readPage(i));
@@ -471,7 +491,6 @@ public class InvertedIndexManager {
         */
 
         TreeMap<String, int[]> dict = new TreeMap<>();
-        int[] key_info = new int[2];
         ByteBuffer segInfo = segment.readPage(0);
 
         int key_num = segInfo.getInt();
@@ -495,6 +514,7 @@ public class InvertedIndexManager {
             dic_content.get(str);
             String tmp_key = new String(str);
             System.out.println("Read: Key: "+ tmp_key);
+            int[] key_info = new int[2];
             key_info[0] = dic_content.getInt();
             System.out.println("Read: Offset: "+ key_info[0]);
             key_info[1] = dic_content.getInt();
@@ -510,7 +530,7 @@ public class InvertedIndexManager {
      * Test Functions---------------------------------------------------------
      */
 
-    public void hashMapTest(){
+    public static void hashMapTest(){
         //Hashmap test
         TreeMap<String, Integer> mt = new TreeMap<>();
         mt.put("a",1);
@@ -533,7 +553,7 @@ public class InvertedIndexManager {
         System.out.println(mt);
     }
 
-    public void readAddBytefferTest(){
+    public static void readAddBytefferTest(){
         //read from byte buffer test
         ByteBuffer tmp = ByteBuffer.allocate(17);
         tmp.putInt(5);
@@ -593,21 +613,39 @@ public class InvertedIndexManager {
 
     }
 
-    public void loopBytebufferTest(){
+    public static void loopBytebufferTest(){
+        //ByteBuffer all = ByteBuffer.allocate(16);
         ByteBuffer tmp = ByteBuffer.allocate(16);
         tmp.putInt(5);
         tmp.putInt(6);
         tmp.putInt(7);
         tmp.putInt(8);
+        tmp.rewind();
+        ByteBuffer i = ByteBuffer.allocate(16);
+        int size = 16;
+        while(size > 0){
+            int write = 1;
+            if(size<1){
+                write = size;
+            }
+            tmp.limit(tmp.position()+write);
+            i.put(tmp);
+            tmp.position(tmp.limit());
+            size -= write;
+        }
+        i.rewind();
+        System.out.println(i.getInt());
+        System.out.println(i.getInt());
+
+        System.out.println(i.getInt());
+
+        System.out.println(i.getInt());
+
     }
 
 
     public static void main(String[] args) throws Exception {
-
-
-
-
-
+        loopBytebufferTest();
 
     }
 
