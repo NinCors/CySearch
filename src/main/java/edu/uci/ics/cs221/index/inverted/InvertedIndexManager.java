@@ -11,6 +11,7 @@ import java.nio.ByteBuffer;
 import org.checkerframework.checker.units.qual.A;
 import org.omg.Messaging.SYNC_WITH_TRANSPORT;
 
+import javax.print.Doc;
 import javax.swing.plaf.synth.SynthTextAreaUI;
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -267,18 +268,12 @@ public class InvertedIndexManager {
         //If there is any remaining bytes not add into disk
         if(page_tmp.position()>0){
             segment.appendPage(page_tmp);
-            page_tmp.position(6);
-            page_tmp.limit(16);
         }
-
-
-
-
 
         System.out.println("Disk has page : "+ segment.getNumPages());
 
         //write the document store file
-        DocumentStore ds = MapdbDocStore.createWithBulkLoad(this.indexFolder+"doc"+segmentCounter+".db",this.DOCSTORE_BUFFER.entrySet().iterator());
+        DocumentStore ds = MapdbDocStore.createWithBulkLoad(this.indexFolder+"doc"+this.segmentCounter+".db",this.DOCSTORE_BUFFER.entrySet().iterator());
 
         //Ready for next segment
         segment.close();
@@ -288,6 +283,35 @@ public class InvertedIndexManager {
         this.SEGMENT_BUFFER.clear();
         this.docCounter = 0;
 
+        if(this.segmentCounter == this.DEFAULT_MERGE_THRESHOLD){
+            mergeAllSegments();
+        }
+
+    }
+
+
+    public void updateSegementDocFile(int segNum){
+        File doc_f1 = new File(this.indexFolder+"doc"+segNum+".db");
+        File doc_f2 = new File(this.indexFolder+"doc"+(segNum+1)+".db");
+        if(!doc_f1.delete() || !doc_f2.delete()){
+            System.out.println("Can't delete old doc!");
+        }
+        File doc_f3 = new File(this.indexFolder+"doc"+segNum+"_tmp"+".db");
+        File doc_f4 = new File(this.indexFolder+"doc"+segNum+".db");
+        if(!doc_f3.renameTo(doc_f4)){
+            System.out.println("Can't rename the new doc!");
+        }
+
+        File f1 = new File(this.indexFolder+"segment"+segNum+".seg");
+        File f2 = new File(this.indexFolder+"segment"+(segNum+1)+".seg");
+        if(!f1.delete() || !f2.delete()){
+            System.out.println("Can't delete old segment!");
+        }
+        File f3 = new File(this.indexFolder+"segment"+segNum+"_tmp"+".seg");
+        File f4 = new File(this.indexFolder+"segment"+segNum+".seg");
+        if(!f3.renameTo(f4)){
+            System.out.println("Can't rename the new segment!");
+        }
     }
 
     /**
@@ -304,14 +328,201 @@ public class InvertedIndexManager {
      *                5. Decrease the segment number when finish one pair
      */
 
+    public void mergeAndflush(int segNum1,int segNum2){
+        System.out.println("Start merge------------------------------------------");
+        //Open two local Doc file to merge
+        DocumentStore ds1 = MapdbDocStore.createOrOpen(this.indexFolder+"doc"+segNum1+".db");
+        DocumentStore ds2 = MapdbDocStore.createOrOpen(this.indexFolder+"doc"+segNum2+".db");
+        DocumentStore merged_ds = MapdbDocStore.createOrOpen(this.indexFolder+"doc"+segNum1+"_tmp"+".db");
+        int doc_counter = 0;
+
+        Iterator<Map.Entry<Integer,Document>> it = ds1.iterator();
+        while(it.hasNext()){
+            //System.out.println("ds1");
+            Map.Entry<Integer,Document> tmp = it.next();
+            merged_ds.addDocument(tmp.getKey(),tmp.getValue());
+            doc_counter++;
+        }
+        Iterator<Map.Entry<Integer,Document>> it2 = ds2.iterator();
+        while(it2.hasNext()){
+            //System.out.println("ds2");
+            Map.Entry<Integer,Document> tmp = it2.next();
+            merged_ds.addDocument(tmp.getKey()+doc_counter,tmp.getValue());
+        }
+
+        ds1.close();
+        ds2.close();
+        merged_ds.close();
+
+        //Opem two segement file to merge
+        Path indexFilePath = Paths.get(this.indexFolder+"segment"+segNum1+".seg");
+        PageFileChannel segment1 = PageFileChannel.createOrOpen(indexFilePath);
+        indexFilePath = Paths.get(this.indexFolder+"segment"+segNum2+".seg");
+        PageFileChannel segment2 = PageFileChannel.createOrOpen(indexFilePath);
+        //create the mergedSegment
+        indexFilePath = Paths.get(this.indexFolder+"segment"+segNum1+"_tmp"+".seg");
+        PageFileChannel merged_segement = PageFileChannel.createOrOpen(indexFilePath);
+
+        TreeMap<String,int[]> dict1 = indexDicDecoder(segment1);
+        TreeMap<String,int[]> dict2 = indexDicDecoder(segment2);
+        TreeMap<String,List<int[]>> merged_dict = new TreeMap<>();
+
+        //get the information of two segement
+        ByteBuffer segInfo = ByteBuffer.allocate(PageFileChannel.PAGE_SIZE);
+        segInfo.put(segment1.readPage(0));
+        segInfo.rewind();
+        int seg1_sizeOfDictionary = segInfo.getInt();
+        int seg1_offset = segInfo.getInt();
+        segInfo = ByteBuffer.allocate(PageFileChannel.PAGE_SIZE);
+        segInfo.put(segment1.readPage(0));
+        segInfo.rewind();
+        int seg2_sizeOfDictionary = segInfo.getInt();
+        int seg2_offset = segInfo.getInt();
+
+        //Build the dictionary part
+        int sizeOfDictionary = 0;
+        int offset = seg1_offset+seg2_offset-8;
+        ByteBuffer dict_part = ByteBuffer.allocate(offset);
+        System.out.println("Budild head_part");
+
+        //build merged map
+        for(Map.Entry<String,int[]>entry:dict1.entrySet()) {
+            entry.getValue()[2] = 0;
+
+            if(merged_dict.containsKey(entry.getKey())){
+                merged_dict.get(entry.getKey()).add(entry.getValue());
+            }
+            else{
+                sizeOfDictionary++;
+                List<int[]> tmp = new ArrayList<>();
+                tmp.add(entry.getValue());
+                merged_dict.put(entry.getKey(),tmp);
+            }
+        }
+
+        for(Map.Entry<String,int[]>entry:dict2.entrySet()) {
+            entry.getValue()[2] = 1;
+
+            if(merged_dict.containsKey(entry.getKey())){
+                merged_dict.get(entry.getKey()).add(entry.getValue());
+            }
+            else{
+                sizeOfDictionary++;
+                List<int[]> tmp = new ArrayList<>();
+                tmp.add(entry.getValue());
+                merged_dict.put(entry.getKey(),tmp);
+            }
+        }
+        dict_part.putInt(sizeOfDictionary);
+        dict_part.putInt(offset);
+
+        offset += (PageFileChannel.PAGE_SIZE - offset%PageFileChannel.PAGE_SIZE);
+        System.out.println("nUM KEY"+sizeOfDictionary+"!!!!!!!!!!!merged map is : " +merged_dict.toString());
+        for(Map.Entry<String,List<int[]>> entry:merged_dict.entrySet()){
+            dict_part.putInt(entry.getKey().length());
+            dict_part.put(entry.getKey().getBytes());
+            dict_part.putInt(offset);
+            //compute the length of new list
+            int len = 0;
+            for(int[] info:merged_dict.get(entry.getKey())){
+                len+= info[1];
+            }
+            dict_part.putInt(len);
+            offset += len;
+        }
+        merged_segement.appendAllBytes(dict_part);
+        System.out.println("Finish head_part");
+
+        //keep write all the posting list to the disk
+        ByteBuffer page_tmp = ByteBuffer.allocate(PageFileChannel.PAGE_SIZE);
+
+        for(Map.Entry<String,List<int[]>> entry:merged_dict.entrySet()){
+            //Construct the list to insert
+            List<Integer> tmp_list = new ArrayList<Integer>();
+            for(int[] keyInfo:entry.getValue()){
+                if(keyInfo[2] == 0){
+                    tmp_list.addAll(indexListDecoder(keyInfo,segment1));
+                }
+                else{
+                    List<Integer> list2 = indexListDecoder(keyInfo,segment2);
+                    for(int i: list2){
+                        tmp_list.add(i+doc_counter);
+                    }
+                }
+            }
+
+            int list_size = tmp_list.size()*4;
+            ByteBuffer postingList = ByteBuffer.allocate(list_size);
+            for(int i:tmp_list){
+                postingList.putInt(i);
+            }
+            postingList.rewind();
+            if(page_tmp.position()+list_size < page_tmp.capacity()){
+                page_tmp.put(postingList);
+            }
+            else {
+                int sizeForCurPage = (PageFileChannel.PAGE_SIZE - page_tmp.position());
+                postingList.position(0);
+                postingList.limit(sizeForCurPage);
+                page_tmp.put(postingList);
+
+                System.out.println("Special case: sizeForCur->" + sizeForCurPage);
+
+                merged_segement.appendPage(page_tmp);
+                page_tmp = ByteBuffer.allocate(PageFileChannel.PAGE_SIZE);
+
+
+                //re-adjust the posting list
+                postingList.rewind();
+                postingList.position(sizeForCurPage);
+
+                int sizeForNextPage = list_size - sizeForCurPage;
+                System.out.println("Special case: sizeForNext->" + sizeForNextPage);
+
+                while (sizeForNextPage > 0) {
+                    int write_size = PageFileChannel.PAGE_SIZE;
+                    if (sizeForNextPage < write_size) {
+                        write_size = sizeForNextPage;
+                    }
+                    if (postingList.position() + write_size < postingList.capacity()) {
+                        postingList.limit(postingList.position() + write_size);
+                    } else {
+                        postingList.limit(postingList.capacity());
+                    }
+                    System.out.println("PostingList: position " + postingList.position() + " Limit " + postingList.limit());
+                    page_tmp.put(postingList);
+                    if (page_tmp.position() == page_tmp.capacity()) {
+                        merged_segement.appendPage(page_tmp);
+                        page_tmp = ByteBuffer.allocate(PageFileChannel.PAGE_SIZE);
+                    }
+                    postingList.position(postingList.limit());
+                    sizeForNextPage -= write_size;
+                }
+            }
+        }
+        System.out.println("Finish listpart");
+
+        //If there is any remaining bytes not add into disk
+        if(page_tmp.position()>0){
+            merged_segement.appendPage(page_tmp);
+        }
+
+        updateSegementDocFile(segNum1);
+        this.segmentCounter--;
+        System.out.println("Finish merge");
+
+    }
+
+
     public void mergeAllSegments() {
         // merge only happens at even number of segments
         Preconditions.checkArgument(getNumSegments() % 2 == 0);
         for(int i = 1; i<this.segmentCounter; i++){
-
+            mergeAndflush(i-1,i);
         }
-
     }
+
+
 
     /**
      * Performs a single keyword search on the inverted index.
@@ -448,7 +659,7 @@ public class InvertedIndexManager {
             Map.Entry<Integer,Document> entry =it.next();
             documents.put(entry.getKey(),entry.getValue());
         }
-
+        ds.close();
         InvertedIndexSegmentForTest test = new InvertedIndexSegmentForTest(invertedList,documents);
         return test;
     }
@@ -498,7 +709,7 @@ public class InvertedIndexManager {
      *      2. Load all pages that contains the dictionary content into one bytebuffer
      *      3. Keep extract the key from this bytebuffer until reaches the size of dictionary
      * @param segment
-     * @return in-memory data structure of dictionary <Key, [offset, length]>
+     * @return in-memory data structure of dictionary <Key, [offset, length, which segment]>
      */
 
     public TreeMap<String, int[]> indexDicDecoder(PageFileChannel segment){
@@ -533,7 +744,7 @@ public class InvertedIndexManager {
             dic_content.get(str);
             String tmp_key = new String(str);
             System.out.println("Read: Key: "+ tmp_key);
-            int[] key_info = new int[2];
+            int[] key_info = new int[3];
             key_info[0] = dic_content.getInt();
             System.out.println("Read: Offset: "+ key_info[0]);
             key_info[1] = dic_content.getInt();
