@@ -135,13 +135,14 @@ public class InvertedIndexManager {
         List<String> words = this.analyzer.analyze(document.getText());
         DOCSTORE_BUFFER.put(this.docCounter, document);
         for(String word:words){
-            if(this.SEGMENT_BUFFER.containsKey(word)){
-                this.SEGMENT_BUFFER.get(word).add(this.docCounter);
-            }
-            else{
-                List<Integer> tmp = new ArrayList<>();
-                tmp.add(this.docCounter);
-                this.SEGMENT_BUFFER.put(word, tmp);
+            if(word!="") {
+                if (this.SEGMENT_BUFFER.containsKey(word)) {
+                    this.SEGMENT_BUFFER.get(word).add(this.docCounter);
+                } else {
+                    List<Integer> tmp = new ArrayList<>();
+                    tmp.add(this.docCounter);
+                    this.SEGMENT_BUFFER.put(word, tmp);
+                }
             }
         }
         this.docCounter++;
@@ -167,6 +168,9 @@ public class InvertedIndexManager {
         //System.out.println(this.DOCSTORE_BUFFER);
 
         //Open segment file
+        if(this.docCounter == 0){
+            return;
+        }
         Path indexFilePath = Paths.get(this.indexFolder+"segment"+segmentCounter+".seg");
         PageFileChannel segment = PageFileChannel.createOrOpen(indexFilePath);
         //get sorted key from the segment buffer
@@ -545,20 +549,142 @@ public class InvertedIndexManager {
      */
     public Iterator<Document> searchQuery(String keyword) {
         Preconditions.checkNotNull(keyword);
+        String key = analyzer.analyze(keyword).get(0);
+        //System.out.println("Search key :" + key);
+        Iterator<Document> it = new Iterator<Document>() {
+            private int cur_seg_num = 0;
+            Iterator<Integer> list = null;
+            DocumentStore ds = null;
 
-        throw new UnsupportedOperationException();
+            private boolean openDoc(){
+                while(cur_seg_num < getNumSegments()){
+                    //System.out.println("Open seg : "+cur_seg_num);
+                    if(this.ds != null){
+                        this.ds.close();
+                    }
+                    this.ds = MapdbDocStore.createOrOpenReadOnly(indexFolder+"doc"+cur_seg_num+".db");
+                    Path indexFilePath = Paths.get(indexFolder+"segment"+cur_seg_num+".seg");
+                    PageFileChannel segment = PageFileChannel.createOrOpen(indexFilePath);
+                    TreeMap<String,int[]> dict = indexDicDecoder(segment);
+
+                    if (!dict.containsKey(key)) {
+                        segment.close();
+                        cur_seg_num++;
+                        continue;
+                    }
+                    //System.out.println("Find keys!" + indexListDecoder(dict.get(key),segment).toString());
+                    TreeSet<Integer> list_set = new TreeSet<>(indexListDecoder(dict.get(key),segment));
+                    list = list_set.iterator();
+                    segment.close();
+                    cur_seg_num++;
+                    return true;
+                }
+                return false;
+            }
+            @Override
+            public boolean hasNext() {
+                if(list==null||!list.hasNext()){
+                    if(!openDoc()){return false;};
+                }
+                return list.hasNext();
+            }
+
+            @Override
+            public Document next() {
+                if(hasNext()){
+                    return ds.getDocument(list.next());
+                }
+                throw new NoSuchElementException();
+            }
+        };
+
+        return it;
     }
 
     /**
      * Performs an AND boolean search on the inverted index.
+     * Program logic:
+     *      For each segment:
+     *          Get the list for each keyword
+     *          Get the common docID that
      *
      * @param keywords a list of keywords in the AND query
      * @return a iterator of documents matching the query
      */
     public Iterator<Document> searchAndQuery(List<String> keywords) {
         Preconditions.checkNotNull(keywords);
+        Iterator<Document> it = new Iterator<Document>() {
+            private int cur_seg_num = 0;
+            Iterator<Integer> list = null;
+            DocumentStore ds = null;
 
-        throw new UnsupportedOperationException();
+            private boolean openDoc(){
+                while(cur_seg_num < getNumSegments()){
+                    if(this.ds != null){
+                        this.ds.close();
+                    }
+                    this.ds = MapdbDocStore.createOrOpenReadOnly(indexFolder+"doc"+cur_seg_num+".db");
+                    Path indexFilePath = Paths.get(indexFolder+"segment"+cur_seg_num+".seg");
+                    PageFileChannel segment = PageFileChannel.createOrOpen(indexFilePath);
+
+                    TreeMap<String,int[]> dict = indexDicDecoder(segment);
+                    List<Set<Integer>> searchID = new ArrayList<>();
+                    boolean find = false;
+
+                    for(String key:keywords){
+                        if(key.length()==0){continue;}
+                        key = analyzer.analyze(key).get(0);
+                        if(!dict.containsKey(key)){
+                            find = false;
+                            break;
+                        }
+                        if(dict.containsKey(key)){
+                            Set<Integer>tmp_set = new HashSet<>(indexListDecoder(dict.get(key),segment));
+                            searchID.add(tmp_set);
+                            find = true;
+                        }
+                    }
+                    if(!find) {
+                        cur_seg_num++;
+                        segment.close();
+                        continue;
+                    }
+
+                    TreeSet<Integer> remove = new TreeSet<>();
+                    for(Integer docId:searchID.get(0)) {
+                        for (int i = 1; i < searchID.size(); i++) {
+                            if(!searchID.get(i).contains(docId)){
+                                remove.add(docId);
+                                break;
+                            }
+                        }
+                    }
+                    searchID.get(0).removeAll(remove);
+                    list = searchID.get(0).iterator();
+                    cur_seg_num++;
+                    segment.close();
+                    return true;
+                }
+                return false;
+            }
+
+            @Override
+            public boolean hasNext() {
+                if(list==null||!list.hasNext()){
+                    if(!openDoc()){return false;};
+                }
+                return list.hasNext();
+            }
+
+            @Override
+            public Document next() {
+                if(hasNext()){
+                    return ds.getDocument(list.next());
+                }
+                throw new NoSuchElementException();
+            }
+        };
+        return it;
     }
 
     /**
@@ -570,7 +696,67 @@ public class InvertedIndexManager {
     public Iterator<Document> searchOrQuery(List<String> keywords) {
         Preconditions.checkNotNull(keywords);
 
-        throw new UnsupportedOperationException();
+        Iterator<Document> it = new Iterator<Document>() {
+            private int cur_seg_num = 0;
+            Iterator<Integer> list = null;
+            DocumentStore ds = null;
+
+            private boolean openDoc(){
+                while(cur_seg_num < getNumSegments()){
+                    //System.out.println("Open SEG "+cur_seg_num);
+                    if(this.ds != null){
+                        this.ds.close();
+                    }
+                    this.ds = MapdbDocStore.createOrOpenReadOnly(indexFolder+"doc"+cur_seg_num+".db");
+                    Path indexFilePath = Paths.get(indexFolder+"segment"+cur_seg_num+".seg");
+                    PageFileChannel segment = PageFileChannel.createOrOpen(indexFilePath);
+
+                    TreeMap<String,int[]> dict = indexDicDecoder(segment);
+                    //System.out.println("Keys "+keywords.toString());
+                    //System.out.println("Dict "+ dict.toString());
+                    TreeSet<Integer> searchID = new TreeSet<>();
+                    boolean find = false;
+
+                    for(String key:keywords){
+                        key = analyzer.analyze(key).get(0);
+                        if(dict.containsKey(key)){
+                            searchID.addAll(indexListDecoder(dict.get(key),segment));
+                            find = true;
+                        }
+                    }
+                    if(!find) {
+                        //System.out.println("Not find it");
+                        cur_seg_num++;
+                        segment.close();
+                        continue;
+                    }
+                    //System.out.println("Find it "+searchID.toString());
+                    list = searchID.iterator();
+                    cur_seg_num++;
+                    segment.close();
+                    return true;
+                }
+                return false;
+            }
+
+            @Override
+            public boolean hasNext() {
+                if(list==null||!list.hasNext()){
+                    if(!openDoc()){return false;};
+                }
+                return list.hasNext();
+            }
+
+            @Override
+            public Document next() {
+                if(hasNext()){
+                    return ds.getDocument(list.next());
+                }
+                throw new NoSuchElementException();
+            }
+        };
+        return it;
+
     }
 
     /**
@@ -581,7 +767,6 @@ public class InvertedIndexManager {
      */
     public Iterator<Document> documentIterator() {
         Iterator<Document> it = new Iterator<Document>() {
-            boolean first = true;
             Iterator<Integer> key = null;
             int cur_seg_num = 0;
             DocumentStore ds = null;
@@ -608,7 +793,7 @@ public class InvertedIndexManager {
                 if(hasNext()){
                     return ds.getDocument(key.next());
                 }
-                return null;
+                throw new NoSuchElementException();
             }
         };
         return it;
@@ -771,6 +956,20 @@ public class InvertedIndexManager {
      * Test Functions---------------------------------------------------------
      */
 
+    public static void setTest(){
+        List<Integer> tmp = Arrays.asList(1,3,4,5,6,7,8,9,9,2,10,11,2,3,56);
+        List<Integer> tmp1 = Arrays.asList(1,3,4,5,6,7,8,9,9,2,10,11,2,3,56);
+        List<Integer> tmp2 = Arrays.asList(3,4,199);
+
+        TreeSet<Integer> s = new TreeSet<>(tmp);
+        s.addAll(tmp);
+        s.addAll(tmp1);
+        s.addAll(tmp2);
+        System.out.println(s);
+        s.removeAll(tmp2);
+        System.out.println(s);
+    }
+
     public static void hashMapTest(){
         //Hashmap test
         TreeMap<String, Integer> mt = new TreeMap<>();
@@ -887,7 +1086,10 @@ public class InvertedIndexManager {
 
 
     public static void main(String[] args) throws Exception {
-        readAddBytefferTest();
+        //setTest();
+        List<String> test = Arrays.asList("hellp","world");
+        String s = "";
+        System.out.println(s.length());
     }
 
 }

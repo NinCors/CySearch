@@ -191,9 +191,11 @@ public class WordBreakTokenizer implements Tokenizer {
 
 
         // If word break can't find a way to divide the input string
+        /*
         if(res.get("0-"+(size-1)).size() == 1 && res.get("0-"+(size-1)).get(0) == text){
+            System.out.println(text);
             throw new RuntimeException();
-        }
+        }*/
 
         // If word break can't do anything about the string due to some special character
         if(res.get("0-"+(size-1)).size() == 0 && prob[0][size-1] == 0){
