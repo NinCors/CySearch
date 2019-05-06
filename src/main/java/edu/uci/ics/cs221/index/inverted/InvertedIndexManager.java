@@ -1,7 +1,6 @@
 package edu.uci.ics.cs221.index.inverted;
 
 import com.google.common.base.Preconditions;
-import com.sun.jdi.request.MethodEntryRequest;
 import edu.uci.ics.cs221.analysis.Analyzer;
 import edu.uci.ics.cs221.storage.Document;
 import edu.uci.ics.cs221.storage.DocumentStore;
@@ -9,11 +8,7 @@ import edu.uci.ics.cs221.storage.MapdbDocStore;
 
 import java.io.File;
 import java.nio.ByteBuffer;
-import org.checkerframework.checker.units.qual.A;
-import org.omg.Messaging.SYNC_WITH_TRANSPORT;
 
-import javax.print.Doc;
-import javax.swing.plaf.synth.SynthTextAreaUI;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
