@@ -1,11 +1,12 @@
 package edu.uci.ics.cs221.index.inverted;
 
-import org.apache.commons.lang.ArrayUtils;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Random;
+
 
 /**
  * Implement this compressor with Delta Encoding and Variable-Length Encoding.
@@ -19,16 +20,16 @@ public class DeltaVarLenCompressor {
         int pre = integers.get(0);
 
         for(int i = 0; i<integers.size();i++){
+            int diff = pre;
             if(i > 0) {
-                //calculate the difference
-                integers.set(i, integers.get(i) - pre);
+                diff = integers.get(i) - pre;
                 //save pre-value
-                pre += integers.get(i);
+                pre += diff;
             }
 
             try {
                 //encode the delta value and write it in the output stream
-                outputStream.write(encode_one(integers.get(i)));
+                outputStream.write(encode_one(diff));
             }
             catch (Exception e){
                 e.printStackTrace();
@@ -81,7 +82,7 @@ public class DeltaVarLenCompressor {
 
     public static byte[] encode_one(int num){
         //Calculate how many bytes needed after compression
-        int totalBytes = ((32 - Integer.numberOfLeadingZeros(num)) + 6) / 7;
+        int totalBytes = (6 + 32 - Integer.numberOfLeadingZeros(num)) / 7;
         //Need at least one byte
         if(totalBytes==0){totalBytes=1;}
         byte[] res = new byte[totalBytes];
@@ -111,11 +112,37 @@ public class DeltaVarLenCompressor {
     public static void main(String[] args) {
         //List<Integer> nums = Arrays.asList(200,400);
 
-        List<Integer> nums = Arrays.asList(1,2,3,4,5,6,7,8,9,10,90,100,111,999,10000,123455);
+        test();
+
+    }
+
+    public static void test(){
+        List<Integer> nums = new ArrayList<>();
+
+        int x =0;
+        int pre = 0;
+        while(x<10000){
+            Random rand = new Random();
+            int n = rand.nextInt(50);
+            nums.add(pre+n);
+            pre = pre+n;
+            x++;
+        }
+
         System.out.println(nums.toString());
         byte[] encoded = encode(nums);
-        List<Integer> returns = decode(encoded,0,encoded.length);
+        List<Integer> returns = new ArrayList<>();
+
+        returns= decode(encoded,0,encoded.length);
         System.out.println(returns.toString());
+
+        if(nums.equals(returns)){
+            System.out.println("Good!!!");
+        }
+        else{
+            System.out.println(">>>>????");
+        }
+
 
     }
 
