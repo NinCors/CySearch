@@ -46,10 +46,6 @@ import java.util.*;
  *                  Fetch both list and merge them to one, then insert it to the new merged file
  *              5. Decrease the segment number when finish one pair
  *
- * Program logic for search operation:
- *       TBC
- *
- *
  */
 
 
@@ -112,6 +108,24 @@ public class InvertedIndexManager {
             throw new UncheckedIOException(e);
         }
     }
+
+
+    /**
+     * Creates a positional index with the given folder, analyzer, and the compressor.
+     * Compressor must be used to compress the inverted lists and the position lists.
+     *
+     */
+    public static InvertedIndexManager createOrOpenPositional(String indexFolder, Analyzer analyzer, Compressor compressor) {
+        throw new UnsupportedOperationException();
+    }
+
+
+
+
+
+
+
+
 
     /**
      * Adds a document to the inverted index.
@@ -816,6 +830,23 @@ public class InvertedIndexManager {
         }
         return this.segmentCounter;
     }
+
+
+    /**
+     * Reads a disk segment of a positional index into memory based on segmentNum.
+     * This function is mainly used for checking correctness in test cases.
+     *
+     * Throws UnsupportedOperationException if the inverted index is not a positional index.
+     *
+     * @param segmentNum n-th segment in the inverted index (start from 0).
+     * @return in-memory data structure with all contents in the index segment, null if segmentNum don't exist.
+     */
+    public PositionalIndexSegmentForTest getIndexSegmentPositional(int segmentNum) {
+        throw new UnsupportedOperationException();
+    }
+
+
+
 
     /**
      * Reads a disk segment into memory based on segmentNum.
