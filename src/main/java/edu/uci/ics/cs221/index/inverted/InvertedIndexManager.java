@@ -315,7 +315,6 @@ public class InvertedIndexManager {
 
     }
 
-
     public void flushWithPos(){
 
         System.out.println("Current segment buffer is " + this.SEGMENT_BUFFER.toString());
@@ -334,8 +333,10 @@ public class InvertedIndexManager {
 
         //calculate the estimated size of the dictionary part
         int dic_size = 8;// sizeofDictionary + DocumentOffset
+        int list_size = 0;
         for(String key:keys){
             dic_size += (12+key.getBytes(StandardCharsets.UTF_8).length);//offset,listLength,keyLength+real key;
+
         }
         ByteBuffer dict_part = ByteBuffer.allocate(dic_size+PageFileChannel.PAGE_SIZE - dic_size%PageFileChannel.PAGE_SIZE);
         dict_part.putInt(keys.size());
@@ -343,6 +344,7 @@ public class InvertedIndexManager {
         System.out.println("Size of dict is : " + dic_size);
 
         dic_size += (PageFileChannel.PAGE_SIZE - dic_size%PageFileChannel.PAGE_SIZE);
+        System.out.println("Size of list start is : " + dic_size);
 
 
         //build the dictionary part
@@ -351,6 +353,7 @@ public class InvertedIndexManager {
 
             try {
                 invertedListBuffer.write(compressed_tmp);
+
             }
             catch (Exception e){
                 e.printStackTrace();
@@ -363,8 +366,13 @@ public class InvertedIndexManager {
 
             dic_size+=compressed_tmp.length;
         }
+        System.out.println("Size of list end is : " + dic_size);
+
         segment.appendAllBytes(dict_part);
 
+        //ByteBuffer bf = ByteBuffer.allocate(PageFileChannel.PAGE_SIZE);
+        //bf.put(invertedListBuffer.toByteArray());
+        //bf.rewind();
         segment.appendAllBytes(ByteBuffer.wrap(invertedListBuffer.toByteArray()));
 
         //write the document store file
@@ -454,7 +462,7 @@ public class InvertedIndexManager {
         ds2.close();
         merged_ds.close();
 
-        //Opem two segement file to merge
+        //Open two segement file to merge
         Path indexFilePath = Paths.get(this.indexFolder+"segment"+segNum1+".seg");
         PageFileChannel segment1 = PageFileChannel.createOrOpen(indexFilePath);
         indexFilePath = Paths.get(this.indexFolder+"segment"+segNum2+".seg");
@@ -538,7 +546,7 @@ public class InvertedIndexManager {
 
         for(Map.Entry<String,List<int[]>> entry:merged_dict.entrySet()){
             //Construct the list to insert
-            List<Integer> tmp_list = new ArrayList<Integer>();
+            List<Integer> tmp_list = new ArrayList<>();
             for(int[] keyInfo:entry.getValue()){
                 if(keyInfo[2] == 0){
                     tmp_list.addAll(indexListDecoder(keyInfo,segment1));
@@ -550,11 +558,20 @@ public class InvertedIndexManager {
                     }
                 }
             }
+            ByteBuffer postingList;
+            int list_size;
+            if(hasPosIndex){
+                byte[] tmp = this.compressor.encode(tmp_list);
+                list_size = tmp.length;
+                postingList = ByteBuffer.wrap(tmp);
 
-            int list_size = tmp_list.size()*4;
-            ByteBuffer postingList = ByteBuffer.allocate(list_size);
-            for(int i:tmp_list){
-                postingList.putInt(i);
+            }
+            else {
+                list_size = tmp_list.size() * 4;
+                postingList = ByteBuffer.allocate(list_size);
+                for (int i : tmp_list) {
+                    postingList.putInt(i);
+                }
             }
             postingList.rewind();
             if(page_tmp.position()+list_size < page_tmp.capacity()){
@@ -945,8 +962,6 @@ public class InvertedIndexManager {
     }
 
 
-
-
     /**
      * Reads a disk segment into memory based on segmentNum.
      * This function is mainly used for checking correctness in test cases.
@@ -1005,8 +1020,8 @@ public class InvertedIndexManager {
         int startPageNum = keyInfo[0]/PageFileChannel.PAGE_SIZE;
         int pageOffset = keyInfo[0]%PageFileChannel.PAGE_SIZE;
         int finishPageNum = startPageNum + (pageOffset + keyInfo[1])/PageFileChannel.PAGE_SIZE;
-        System.out.println("List: Offset: "+ keyInfo[0] + " Length : "+keyInfo[1]);
-        System.out.println("List: StartPage: "+ startPageNum + " pageOffset: "+pageOffset + " finishPageNum" + finishPageNum);
+        //System.out.println("List: Offset: "+ keyInfo[0] + " Length : "+keyInfo[1]);
+        //System.out.println("List: StartPage: "+ startPageNum + " pageOffset: "+pageOffset + " finishPageNum" + finishPageNum);
         ByteBuffer list_buffer = ByteBuffer.allocate((finishPageNum-startPageNum+1)*PageFileChannel.PAGE_SIZE);
         List<Integer>res = new ArrayList<>();
 
@@ -1015,8 +1030,12 @@ public class InvertedIndexManager {
         }
         list_buffer.position(pageOffset);
 
+
+
         if(hasPosIndex) {
-            return compressor.decode(new byte[list_buffer.remaining()],0,keyInfo[1]);
+            byte[] bytes = new byte[keyInfo[1]];
+            list_buffer.get(bytes);
+            return compressor.decode(bytes,0,keyInfo[1]);
         }
 
         for(int i = 0; i<=keyInfo[1]-4;i+=4){
@@ -1044,7 +1063,7 @@ public class InvertedIndexManager {
         int key_num = segInfo.getInt();
         int doc_offset = segInfo.getInt();
         int page_num = doc_offset/PageFileChannel.PAGE_SIZE;
-        System.out.println("KeyNum: "+key_num+" docOffset: "+ doc_offset + " pageNum: "+page_num);
+        //System.out.println("KeyNum: "+key_num+" docOffset: "+ doc_offset + " pageNum: "+page_num);
 
         ByteBuffer dic_content = ByteBuffer.allocate((page_num+1)*PageFileChannel.PAGE_SIZE).put(segInfo);
 
@@ -1057,18 +1076,20 @@ public class InvertedIndexManager {
         //Format -> <key_length, key, offset, length>
         while(key_num > 0){
             int key_length =dic_content.getInt();
-            //System.out.println("Read: keyLength: "+ key_length);
             byte[] str = new byte[key_length];
             dic_content.get(str);
             String tmp_key = new String(str,StandardCharsets.UTF_8);
-            //System.out.println("Read: Key: "+ tmp_key);
             int[] key_info = new int[3];
             key_info[0] = dic_content.getInt();
-            //System.out.println("Read: Offset: "+ key_info[0]);
             key_info[1] = dic_content.getInt();
-            //System.out.println("Read: Length: "+ key_info[1]);
             dict.put(tmp_key,key_info);
             key_num--;
+
+            //System.out.println("Read: keyLength: "+ key_length);
+            //System.out.println("Read: Key: "+ tmp_key);
+            //System.out.println("Read: Offset: "+ key_info[0]);
+            //System.out.println("Read: Length: "+ key_info[1]);
+
         }
 
         return dict;
@@ -1206,11 +1227,49 @@ public class InvertedIndexManager {
 
     }
 
+    public static void ByteOutPutStream(){
+        DeltaVarLenCompressor dv = new DeltaVarLenCompressor();
+        ByteArrayOutputStream invertedListBuffer = new ByteArrayOutputStream();
+        ByteBuffer zxc = ByteBuffer.allocate(100);
+
+        List<Integer> list = Arrays.asList(1);
+        List<Integer> list1 = Arrays.asList(2);
+        List<Integer> list2 = Arrays.asList(3);
+
+
+        try{
+            byte[] compress = dv.encode(list);
+
+            zxc.put(compress[0]);
+            compress = dv.encode(list1);
+            zxc.put(compress[0]);
+            compress = dv.encode(list2);
+            zxc.put(compress[0]);
+
+        }
+        catch (Exception e){e.printStackTrace();}
+
+        zxc.flip();
+        byte[] tmp = new byte[3];
+        zxc.get(tmp);
+
+        List<Integer> res = dv.decode(tmp,0,3);
+        System.out.println(res);
+
+        ByteBuffer qwewq = ByteBuffer.allocate(30);
+        qwewq.putInt(10);
+        System.out.println(qwewq.position());
+        System.out.println(qwewq.limit());
+        qwewq.flip();
+        System.out.println(qwewq.position());
+        System.out.println(qwewq.limit());
+
+
+    }
+
+
     public static void main(String[] args) throws Exception {
-        //setTest();
-        List<String> test = Arrays.asList("hellp","world");
-        String s = "";
-        System.out.println(s.length());
+        ByteOutPutStream();
     }
 
 }
