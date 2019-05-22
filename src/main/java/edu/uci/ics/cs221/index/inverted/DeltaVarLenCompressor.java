@@ -14,7 +14,7 @@ import java.util.Random;
 public class DeltaVarLenCompressor {
 
     //@Override
-    public static byte[] encode(List<Integer> integers) {
+    public byte[] encode(List<Integer> integers) {
         ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
         int pre = integers.get(0);
 
@@ -40,7 +40,7 @@ public class DeltaVarLenCompressor {
     }
 
     //@Override
-    public static List<Integer> decode(byte[] bytes, int start, int length) {
+    public List<Integer> decode(byte[] bytes, int start, int length) {
         if(start + length > bytes.length){
             throw new UnsupportedOperationException();
         }
@@ -129,10 +129,10 @@ public class DeltaVarLenCompressor {
         }
 
         System.out.println(nums.toString());
-        byte[] encoded = encode(nums);
+        //byte[] encoded = encode(nums);
         List<Integer> returns = new ArrayList<>();
 
-        returns= decode(encoded,0,encoded.length);
+        //returns= decode(encoded,0,encoded.length);
         System.out.println(returns.toString());
 
         if(nums.equals(returns)){

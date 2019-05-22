@@ -6,6 +6,7 @@ import edu.uci.ics.cs221.storage.Document;
 import edu.uci.ics.cs221.storage.DocumentStore;
 import edu.uci.ics.cs221.storage.MapdbDocStore;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.nio.ByteBuffer;
 
@@ -46,6 +47,13 @@ import java.util.*;
  *                  Fetch both list and merge them to one, then insert it to the new merged file
  *              5. Decrease the segment number when finish one pair
  *
+ *
+ * Todo:
+ *      1. Compress Inverted Index
+ *      2. Create Positional Index
+ *      3. Compress positional Index
+ *      4. Phase Search
+ *
  */
 
 
@@ -66,10 +74,13 @@ public class InvertedIndexManager {
      * In test cases, the default merge threshold could possibly be set to any number.
      */
     public static int DEFAULT_MERGE_THRESHOLD = 8;
+    public static boolean hasPosIndex = true;
+
 
     private TreeMap<String,List<Integer>> SEGMENT_BUFFER;
     private TreeMap<Integer,Document> DOCSTORE_BUFFER;
     private Analyzer analyzer;
+    private DeltaVarLenCompressor compressor = new DeltaVarLenCompressor();
     private int docCounter;
     private int segmentCounter;
     protected String indexFolder;
@@ -116,14 +127,9 @@ public class InvertedIndexManager {
      *
      */
     public static InvertedIndexManager createOrOpenPositional(String indexFolder, Analyzer analyzer, Compressor compressor) {
+        hasPosIndex = true;
         throw new UnsupportedOperationException();
     }
-
-
-
-
-
-
 
 
 
@@ -155,6 +161,10 @@ public class InvertedIndexManager {
         }
         this.docCounter++;
         if(this.docCounter == DEFAULT_FLUSH_THRESHOLD){
+            if(hasPosIndex){
+                flushWithPos();
+                return;
+            }
             flush();
             return;
         }
@@ -239,7 +249,6 @@ public class InvertedIndexManager {
                  */
                 //append the leftside of list into page
 
-
                 int sizeForCurPage = (PageFileChannel.PAGE_SIZE - page_tmp.position());
                 postingList.position(0);
                 postingList.limit(sizeForCurPage);
@@ -304,6 +313,73 @@ public class InvertedIndexManager {
 
     }
 
+
+    public void flushWithPos(){
+
+        ByteArrayOutputStream invertedListBuffer = new ByteArrayOutputStream();
+
+        //Open segment file
+        if(this.docCounter == 0){
+            return;
+        }
+        Path indexFilePath = Paths.get(this.indexFolder+"segment"+segmentCounter+".seg");
+        PageFileChannel segment = PageFileChannel.createOrOpen(indexFilePath);
+        //get sorted key from the segment buffer
+        Set<String> keys = this.SEGMENT_BUFFER.keySet();
+
+        //calculate the estimated size of the dictionary part
+        int dic_size = 8;// sizeofDictionary + DocumentOffset
+        for(String key:keys){
+            dic_size += (12+key.getBytes(StandardCharsets.UTF_8).length);//offset,listLength,keyLength+real key;
+        }
+        ByteBuffer dict_part = ByteBuffer.allocate(dic_size+PageFileChannel.PAGE_SIZE - dic_size%PageFileChannel.PAGE_SIZE);
+        dict_part.putInt(keys.size());
+        dict_part.putInt(dic_size);
+        //System.out.println("Size of dict is : " + dic_size);
+
+        dic_size += (PageFileChannel.PAGE_SIZE - dic_size%PageFileChannel.PAGE_SIZE);
+
+
+        //build the dictionary part
+        for(String key:keys){
+            byte[] compressed_tmp = this.compressor.encode(this.SEGMENT_BUFFER.get(key));
+
+            try {
+                invertedListBuffer.write(compressed_tmp);
+            }
+            catch (Exception e){
+                e.printStackTrace();
+            }
+
+            dict_part.putInt(key.getBytes(StandardCharsets.UTF_8).length);
+            dict_part.put(key.getBytes(StandardCharsets.UTF_8));
+            dict_part.putInt(dic_size);
+            dict_part.putInt(compressed_tmp.length);
+
+            dic_size+=compressed_tmp.length;
+        }
+        segment.appendAllBytes(dict_part);
+
+        segment.appendAllBytes(ByteBuffer.wrap(invertedListBuffer.toByteArray()));
+
+        //write the document store file
+        DocumentStore ds = MapdbDocStore.createWithBulkLoad(this.indexFolder+"doc"+this.segmentCounter+".db",this.DOCSTORE_BUFFER.entrySet().iterator());
+
+        //Ready for next segment
+        segment.close();
+        ds.close();
+        this.segmentCounter++;
+        this.DOCSTORE_BUFFER.clear();
+        this.SEGMENT_BUFFER.clear();
+        this.docCounter = 0;
+        try{ invertedListBuffer.close();}
+        catch (Exception e){e.printStackTrace();}
+
+        if(this.segmentCounter == this.DEFAULT_MERGE_THRESHOLD){
+            mergeAllSegments();
+        }
+
+    }
 
     public void updateSegementDocFile(int segNum, int mergedSegId){
         File doc_f1 = new File(this.indexFolder+"doc"+segNum+".db");
@@ -768,6 +844,24 @@ public class InvertedIndexManager {
     }
 
     /**
+     * Performs a phrase search on a positional index.
+     * Phrase search means the document must contain the consecutive sequence of keywords in exact order.
+     *
+     * You could assume the analyzer won't convert each keyword into multiple tokens.
+     * Throws UnsupportedOperationException if the inverted index is not a positional index.
+     *
+     * @param phrase, a consecutive sequence of keywords
+     * @return a iterator of documents matching the query
+     */
+    public Iterator<Document> searchPhraseQuery(List<String> phrase) {
+        Preconditions.checkNotNull(phrase);
+
+        throw new UnsupportedOperationException();
+    }
+
+
+
+    /**
      * Iterates through all the documents in all disk segments.
      * Program logic:
      *      1. Scan all the doc file and keep read
@@ -909,13 +1003,17 @@ public class InvertedIndexManager {
         //System.out.println("List: Offset: "+ keyInfo[0] + " Length : "+keyInfo[1]);
         //System.out.println("List: StartPage: "+ startPageNum + " pageOffset: "+pageOffset + " finishPageNum" + finishPageNum);
         ByteBuffer list_buffer = ByteBuffer.allocate((finishPageNum-startPageNum+1)*PageFileChannel.PAGE_SIZE);
-
+        List<Integer>res = new ArrayList<>();
 
         for(int i = startPageNum; i<=finishPageNum;i++){
             list_buffer.put(segment.readPage(i));
         }
         list_buffer.position(pageOffset);
-        List<Integer>res = new ArrayList<>();
+
+        if(hasPosIndex) {
+            return compressor.decode(new byte[list_buffer.remaining()],0,keyInfo[1]);
+        }
+
         for(int i = 0; i<=keyInfo[1]-4;i+=4){
             res.add(list_buffer.getInt());
         }
@@ -1108,7 +1206,6 @@ public class InvertedIndexManager {
         System.out.println(i.getInt());
 
     }
-
 
     public static void main(String[] args) throws Exception {
         //setTest();
