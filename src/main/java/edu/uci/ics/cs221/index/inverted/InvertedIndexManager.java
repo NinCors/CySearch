@@ -161,10 +161,6 @@ public class InvertedIndexManager {
         }
         this.docCounter++;
         if(this.docCounter == DEFAULT_FLUSH_THRESHOLD){
-            if(hasPosIndex){
-                flushWithPos();
-                return;
-            }
             flush();
             return;
         }
@@ -184,11 +180,17 @@ public class InvertedIndexManager {
     public void flush() {
         //System.out.println(this.SEGMENT_BUFFER);
         //System.out.println(this.DOCSTORE_BUFFER);
-
         //Open segment file
+
         if(this.docCounter == 0){
             return;
         }
+
+        if(hasPosIndex){
+            flushWithPos();
+            return;
+        }
+
         Path indexFilePath = Paths.get(this.indexFolder+"segment"+segmentCounter+".seg");
         PageFileChannel segment = PageFileChannel.createOrOpen(indexFilePath);
         //get sorted key from the segment buffer
@@ -316,6 +318,9 @@ public class InvertedIndexManager {
 
     public void flushWithPos(){
 
+        System.out.println("Current segment buffer is " + this.SEGMENT_BUFFER.toString());
+
+
         ByteArrayOutputStream invertedListBuffer = new ByteArrayOutputStream();
 
         //Open segment file
@@ -335,7 +340,7 @@ public class InvertedIndexManager {
         ByteBuffer dict_part = ByteBuffer.allocate(dic_size+PageFileChannel.PAGE_SIZE - dic_size%PageFileChannel.PAGE_SIZE);
         dict_part.putInt(keys.size());
         dict_part.putInt(dic_size);
-        //System.out.println("Size of dict is : " + dic_size);
+        System.out.println("Size of dict is : " + dic_size);
 
         dic_size += (PageFileChannel.PAGE_SIZE - dic_size%PageFileChannel.PAGE_SIZE);
 
@@ -1000,8 +1005,8 @@ public class InvertedIndexManager {
         int startPageNum = keyInfo[0]/PageFileChannel.PAGE_SIZE;
         int pageOffset = keyInfo[0]%PageFileChannel.PAGE_SIZE;
         int finishPageNum = startPageNum + (pageOffset + keyInfo[1])/PageFileChannel.PAGE_SIZE;
-        //System.out.println("List: Offset: "+ keyInfo[0] + " Length : "+keyInfo[1]);
-        //System.out.println("List: StartPage: "+ startPageNum + " pageOffset: "+pageOffset + " finishPageNum" + finishPageNum);
+        System.out.println("List: Offset: "+ keyInfo[0] + " Length : "+keyInfo[1]);
+        System.out.println("List: StartPage: "+ startPageNum + " pageOffset: "+pageOffset + " finishPageNum" + finishPageNum);
         ByteBuffer list_buffer = ByteBuffer.allocate((finishPageNum-startPageNum+1)*PageFileChannel.PAGE_SIZE);
         List<Integer>res = new ArrayList<>();
 
@@ -1032,12 +1037,6 @@ public class InvertedIndexManager {
      */
 
     public TreeMap<String, int[]> indexDicDecoder(PageFileChannel segment){
-        /*
-        File seg = new File(this.indexFolder+"segment"+segmentNum+".seg");
-        if(!seg.exists()){return null;}
-        Path indexFilePath = Paths.get(this.indexFolder+"segment"+segmentNum+".seg");
-        PageFileChannel segment = PageFileChannel.createOrOpen(indexFilePath);
-        */
 
         TreeMap<String, int[]> dict = new TreeMap<>();
         ByteBuffer segInfo = segment.readPage(0);
@@ -1045,7 +1044,7 @@ public class InvertedIndexManager {
         int key_num = segInfo.getInt();
         int doc_offset = segInfo.getInt();
         int page_num = doc_offset/PageFileChannel.PAGE_SIZE;
-        //System.out.println("KeyNum: "+key_num+" docOffset: "+ doc_offset + " pageNum: "+page_num);
+        System.out.println("KeyNum: "+key_num+" docOffset: "+ doc_offset + " pageNum: "+page_num);
 
         ByteBuffer dic_content = ByteBuffer.allocate((page_num+1)*PageFileChannel.PAGE_SIZE).put(segInfo);
 
