@@ -3,6 +3,7 @@ package edu.uci.ics.cs221.index.inverted;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Table;
 import com.google.common.collect.TreeBasedTable;
+import com.sun.source.util.Trees;
 import edu.uci.ics.cs221.analysis.Analyzer;
 import edu.uci.ics.cs221.storage.Document;
 import edu.uci.ics.cs221.storage.DocumentStore;
@@ -762,8 +763,6 @@ public class InvertedIndexManager {
 
     }
 
-
-
     public void mergerAndFlushWithPos(int segNum1,int segNum2,int mergedSegId){
         //System.out.println("Start merge with POS------------------------------------------");
         //Open two local Doc file to merge
@@ -808,8 +807,11 @@ public class InvertedIndexManager {
         posSeg2.close();
 
         File f1 = new File(this.indexFolder+"posIndex"+segNum1+".pos");
-        File f2 = new File(this.indexFolder+"posIndex"+mergedSegId+".pos");
-        if(!f1.renameTo(f2)){
+        File f2 = new File(this.indexFolder+"posIndex"+segNum2+".pos");
+
+        File newfile = new File(this.indexFolder+"posIndex"+mergedSegId+".pos");
+
+        if(!f1.renameTo(newfile) || !f2.delete()){
             throw new UnsupportedOperationException();
         }
 
@@ -1097,7 +1099,6 @@ public class InvertedIndexManager {
 
     }
 
-
     public void mergeAllSegments() {
         // merge only happens at even number of segments
         Preconditions.checkArgument(getNumSegments() % 2 == 0);
@@ -1109,7 +1110,6 @@ public class InvertedIndexManager {
             mergedSegId++;
         }
     }
-
 
     /**
      * Performs a single keyword search on the inverted index.
@@ -1204,7 +1204,7 @@ public class InvertedIndexManager {
                     boolean find = false;
 
                     for(String key:keywords){
-                        if(key.length()==0){continue;}
+                        if(key.length()==0 || dict.get(key).length==1){continue;}
                         key = analyzer.analyze(key).get(0);
                         if(!dict.containsKey(key)){
                             find = false;
@@ -1338,15 +1338,209 @@ public class InvertedIndexManager {
      * You could assume the analyzer won't convert each keyword into multiple tokens.
      * Throws UnsupportedOperationException if the inverted index is not a positional index.
      *
+     * 1. Find all the common Doc IDs for all the keywords
+     *
+     * 2. For each common Doc ID,
+     *      extract its positional index, and save it into an list
+     *      {k1,k2,k3,k4}
+     *      For all the positional index x in k1
+     *          Loop the rest of postional index of key words, and try to find the increased number x+1 +1 +1
+     *      If all keywords qualified,
+     *          return this Doc ID
+     *
      * @param phrase, a consecutive sequence of keywords
      * @return a iterator of documents matching the query
      */
     public Iterator<Document> searchPhraseQuery(List<String> phrase) {
         Preconditions.checkNotNull(phrase);
+        if(!hasPosIndex){throw new UnsupportedOperationException();}
 
-        throw new UnsupportedOperationException();
+
+        List<String> real_phrase = new ArrayList<>();
+        for(int i = 0; i<phrase.size();i++){
+            //System.out.println(phrase.toString() + " : " + analyzer.analyze(phrase.get(i)));
+            if(analyzer.analyze(phrase.get(i)).size()>0) {
+                real_phrase.add(analyzer.analyze(phrase.get(i)).get(0));
+            }
+        }
+
+        Iterator<Document> it = new Iterator<Document>() {
+            private int cur_seg_num = 0;
+            Iterator<Integer> it =null;
+            DocumentStore ds = null;
+
+            private boolean openDoc(){
+                while(cur_seg_num < getNumSegments()){
+                    if(this.ds != null){
+                        this.ds.close();
+                    }
+
+                    it = getCommonDocId(real_phrase,cur_seg_num);
+
+                    if(it == null){
+                        cur_seg_num++;
+                        continue;
+                    }
+
+                    this.ds = MapdbDocStore.createOrOpenReadOnly(indexFolder+"doc"+cur_seg_num+".db");
+                    cur_seg_num++;
+                    return true;
+                }
+                return false;
+            }
+
+            @Override
+            public boolean hasNext() {
+                if(it==null||!it.hasNext()){
+                    if(!openDoc()){return false;}
+                }
+                return it.hasNext();
+            }
+
+            @Override
+            public Document next() {
+                if(hasNext()){
+                    return ds.getDocument(it.next());
+                }
+                throw  new NoSuchElementException();
+            }
+        };
+
+
+        return it;
     }
 
+    /**
+     * Get the common doc ids for the given phrase in this current segNum
+     */
+
+    public Iterator<Integer> getCommonDocId(List<String> phrase, int cur_seg_num){
+
+        Path indexFilePath = Paths.get(indexFolder+"segment"+cur_seg_num+".seg");
+        PageFileChannel segment = PageFileChannel.createOrOpen(indexFilePath);
+
+        //Create the positional index file
+        Path posIndexFilePath = Paths.get(this.indexFolder+"posIndex"+cur_seg_num+".pos");
+        PageFileChannel posIndexSeg = PageFileChannel.createOrOpen(posIndexFilePath);
+
+        TreeMap<String,int[]> dict = indexDicDecoder(segment);
+        List<Set<Integer>> searchID = new ArrayList<>();
+
+        /*
+        System.out.println("For segment : " + cur_seg_num);
+        System.out.println("Dict part contains "+ dict.toString());
+        System.out.println("Search for "+ phrase.toString());
+        */
+
+        boolean find = true;
+
+        for(String key:phrase){
+            if(key.length()== 0){continue;}
+            if(!dict.containsKey(key)){
+                find = false;
+                break;
+            }
+        }
+        if(!find) {
+            segment.close();
+            //System.out.println(cur_seg_num + " seg : does not contain all the keys" );
+            return null;
+        }
+
+        List<String> keys = new ArrayList<>( new TreeSet(dict.keySet()));
+
+        TreeMap<String,List<List<Integer>>> keyPostingList = new TreeMap<>();
+        // keyPostingList: <Key, <InvertedIndex, offsetList>>
+
+        for(String key:phrase){
+            if(key.length()== 0){continue;}
+            String next_key = keys.get(keys.indexOf(key)+1);
+            keyPostingList.put(key, getOneDataChunk(dict.get(key),dict.get(next_key)[0],segment));
+        }
+
+        TreeSet<Integer> remove = new TreeSet<>();
+        //System.out.println("Key positing list is : " + keyPostingList.toString());
+        //System.out.println("search phase is " + phrase.toString());
+        TreeSet<Integer> commonDocId = new TreeSet<>(keyPostingList.get(phrase.get(0)).get(0));
+
+
+        for(Integer docId: commonDocId){
+            for (int i = 1; i < phrase.size(); i++) {
+                if(!keyPostingList.get(phrase.get(i)).get(0).contains(docId)){
+                    remove.add(docId);
+                }
+            }
+        }
+
+        commonDocId.removeAll(remove);
+
+        //System.out.println("The common doc id for the seg "+cur_seg_num + " is " + commonDocId.toString());
+
+        TreeSet<Integer> res = new TreeSet<>();
+        for(Integer docId: commonDocId){
+            // Get the real positional index for this document
+            // keyPostingList: <Key, <InvertedIndex, offsetList>>
+            List<Set<Integer>> posIndexs = new ArrayList<>();
+            for(String key:phrase){
+                int pos = keyPostingList.get(key).get(0).indexOf(docId);
+                int start = keyPostingList.get(key).get(1).get(pos*2);
+                int end = keyPostingList.get(key).get(1).get(pos*2+1);
+                posIndexs.add(new HashSet<>(decodePositionalIndex(start,end,posIndexSeg)));
+            }
+
+            //System.out.println("For docID : "+ docId);
+            //System.out.println(posIndexs);
+
+            boolean rightPos = true;
+
+            for(Integer pos: posIndexs.get(0)){
+                rightPos = true;
+                for(int i = 1; i<posIndexs.size();i++){
+                    if(!posIndexs.get(i).contains(pos+i)){
+                        rightPos = false;
+                        break;
+                    }
+                }
+                if(rightPos){break;}
+            }
+
+            if(rightPos){
+                res.add(docId);
+            }
+        }
+
+        if(res.size() == 0){
+            //System.out.println("Have common id but no right position");
+            return null;
+        }
+
+        //System.out.println("Find id : " + res.toString());
+
+        return res.iterator();
+    }
+
+
+    public List<List<Integer>> getOneDataChunk(int[] keyInfo, int end, PageFileChannel segment) {
+        int startPageNum = keyInfo[0]/PageFileChannel.PAGE_SIZE;
+        int pageOffset = keyInfo[0]%PageFileChannel.PAGE_SIZE;
+
+        int finishPageNum = end/PageFileChannel.PAGE_SIZE;
+
+        ByteBuffer dataChunk = ByteBuffer.allocate((finishPageNum-startPageNum+1)*PageFileChannel.PAGE_SIZE);
+
+        for(int i = startPageNum; i<=finishPageNum;i++) {
+            dataChunk.put(segment.readPage(i));
+        }
+
+        dataChunk.position(pageOffset);
+        dataChunk.limit(pageOffset+(end-keyInfo[0]));
+
+        byte[] invertedList = new byte[keyInfo[1]]; // get the inverted list
+        byte[] offsetList = new byte[end-keyInfo[0] - keyInfo[1]]; //get the offset list
+        dataChunk.get(invertedList);
+        dataChunk.get(offsetList);
+        return Arrays.asList(compressor.decode(invertedList),compressor.decode(offsetList));
+    }
 
 
     /**
@@ -1594,14 +1788,13 @@ public class InvertedIndexManager {
     }
 
 
-
-    /**
-     * Reads a disk segment into memory based on segmentNum.
-     * This function is mainly used for checking correctness in test cases.
-     *
-     * @param segmentNum n-th segment in the inverted index (start from 0).
-     * @return in-memory data structure with all contents in the index segment, null if segmentNum don't exist.
-     */
+        /**
+         * Reads a disk segment into memory based on segmentNum.
+         * This function is mainly used for checking correctness in test cases.
+         *
+         * @param segmentNum n-th segment in the inverted index (start from 0).
+         * @return in-memory data structure with all contents in the index segment, null if segmentNum don't exist.
+         */
     public InvertedIndexSegmentForTest getIndexSegment(int segmentNum) {
         File seg = new File(indexFolder+"segment"+segmentNum+".seg");
         File doc = new File(indexFolder+"doc"+segmentNum+".db");
@@ -1634,6 +1827,7 @@ public class InvertedIndexManager {
     }
 
 
+
     /**
      * Decode one posting list from segment file based on the dictionary information <offset, length>
      * Program logic:
@@ -1642,7 +1836,6 @@ public class InvertedIndexManager {
      * @param segment
      * @return
      */
-
 
     public List<Integer> indexListDecoder(int[] keyInfo, PageFileChannel segment){
         /*
