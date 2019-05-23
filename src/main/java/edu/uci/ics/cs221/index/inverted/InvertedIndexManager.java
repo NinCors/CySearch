@@ -497,6 +497,7 @@ public class InvertedIndexManager {
         this.segmentCounter++;
         this.DOCSTORE_BUFFER.clear();
         this.SEGMENT_BUFFER.clear();
+        this.POS_BUFFER.clear();
         this.docCounter = 0;
         try{ invertedListBuffer.close();}
         catch (Exception e){e.printStackTrace();}
@@ -790,9 +791,9 @@ public class InvertedIndexManager {
 
         int offsetForPos2 = posSeg1.getNumPages()*PageFileChannel.PAGE_SIZE;
 
-        for(int i = 0; i<posSeg1.getNumPages();i++){
+        for(int i = 0; i<posSeg2.getNumPages();i++){
             ByteBuffer bf = posSeg2.readPage(i);
-            posSeg2.appendPage(bf);
+            posSeg1.appendPage(bf);
         }
 
         posSeg1.close();
@@ -961,10 +962,15 @@ public class InvertedIndexManager {
                 for(int i =0; i< k2_offsets.size();i++){
                     k2_offsets.set(i,k2_offsets.get(i)+offsetForPos2);
                 }
-                k1_offsets.addAll(k1_offsets);
+                k1_offsets.addAll(k2_offsets);
+
+                System.out.println("merge k1 k2");
+                System.out.println(k1_invertList.toString());
+                System.out.println(k2_offsets);
+                System.out.println(k1_offsets.toString());
 
                 k1_list.set(0,compressor.encode(k1_invertList));
-                k1_list.set(1,compressor.encode(k1_invertList));
+                k1_list.set(1,compressor.encode(k1_offsets));
 
                 lists_size = k1_list.get(0).length + k1_list.get(1).length;
                 inverted_len = k1_list.get(0).length;
@@ -1433,13 +1439,15 @@ public class InvertedIndexManager {
             List<Integer> inverList = compressor.decode(chunk.get(0));
             invertedLists.put(key,inverList);
             List<Integer> offsetList = compressor.decode(chunk.get(1));
+            System.out.println("-------------------" );
 
             System.out.println("For key : " + key );
             System.out.println("Inverted index :" + inverList.toString());
             System.out.println("Offset Index : is " + offsetList.toString());
+            System.out.println("OFFset size is : " + offsetList.size());
 
-            for(int i =0; i< offsetList.size()-1; i++){
-                List<Integer> posIndex = decodePositionalIndex(offsetList.get(i),offsetList.get(i+1),posSeg);
+            for(int i =0; i< inverList.size(); i++){
+                List<Integer> posIndex = decodePositionalIndex(offsetList.get(i*2),offsetList.get(i*2+1),posSeg);
                 System.out.println("Doc: " + inverList.get(i)+" Positional Index : is " + posIndex.toString());
                 positions.put(key,inverList.get(i),posIndex);
             }
@@ -1460,7 +1468,7 @@ public class InvertedIndexManager {
     }
 
     public List<Integer> decodePositionalIndex(int start, int end, PageFileChannel segment){
-        //System.out.println("Decoding "+start + " "+ end);
+        System.out.println("Decoding "+start + " "+ end);
         List<Integer> res = new ArrayList<>();
 
         int startPageNum = start/PageFileChannel.PAGE_SIZE;
