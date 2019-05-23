@@ -7,6 +7,7 @@ import edu.uci.ics.cs221.analysis.Analyzer;
 import edu.uci.ics.cs221.storage.Document;
 import edu.uci.ics.cs221.storage.DocumentStore;
 import edu.uci.ics.cs221.storage.MapdbDocStore;
+import org.omg.CORBA.PUBLIC_MEMBER;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -467,7 +468,7 @@ public class InvertedIndexManager {
                 dict_part.putInt(compressed_docId.length);//only save the length of docID list
                 dic_size+=(compressed_docId.length+compressed_offsetList.length);
 
-                System.out.println(key + " : "+ offsetList.toString());
+                //System.out.println(key + " : "+ offsetList.toString());
             }
             catch (Exception e){
                 e.printStackTrace();
@@ -555,6 +556,10 @@ public class InvertedIndexManager {
      */
 
     public void mergeAndflush(int segNum1,int segNum2,int mergedSegId){
+        if(hasPosIndex){
+            mergerAndFlushWithPos(segNum1,segNum2,mergedSegId);
+            return;
+        }
         //System.out.println("Start merge------------------------------------------");
         //Open two local Doc file to merge
         DocumentStore ds1 = MapdbDocStore.createOrOpen(this.indexFolder+"doc"+segNum1+".db");
@@ -745,6 +750,329 @@ public class InvertedIndexManager {
         updateSegementDocFile(segNum1,mergedSegId);
         this.segmentCounter--;
         //System.out.println("Finish merge");
+
+    }
+
+
+
+    public void mergerAndFlushWithPos(int segNum1,int segNum2,int mergedSegId){
+        System.out.println("Start merge with POS------------------------------------------");
+        //Open two local Doc file to merge
+        DocumentStore ds1 = MapdbDocStore.createOrOpen(this.indexFolder+"doc"+segNum1+".db");
+        DocumentStore ds2 = MapdbDocStore.createOrOpen(this.indexFolder+"doc"+segNum2+".db");
+        DocumentStore merged_ds = MapdbDocStore.createOrOpen(this.indexFolder+"doc"+segNum1+"_tmp"+".db");
+        int doc_counter = 0;
+
+        Iterator<Map.Entry<Integer,Document>> it = ds1.iterator();
+        while(it.hasNext()){
+            //System.out.println("ds1");
+            Map.Entry<Integer,Document> tmp = it.next();
+            merged_ds.addDocument(tmp.getKey(),tmp.getValue());
+            doc_counter++;
+        }
+        Iterator<Map.Entry<Integer,Document>> it2 = ds2.iterator();
+        while(it2.hasNext()){
+            //System.out.println("ds2");
+            Map.Entry<Integer,Document> tmp = it2.next();
+            merged_ds.addDocument(tmp.getKey()+doc_counter,tmp.getValue());
+        }
+
+        ds1.close();
+        ds2.close();
+        merged_ds.close();
+
+        //Open two positional file to merge
+        Path posIndexFilePath1 = Paths.get(this.indexFolder+"posIndex"+segNum1+".pos");
+        Path posIndexFilePath2 = Paths.get(this.indexFolder+"posIndex"+segNum2+".pos");
+
+        PageFileChannel posSeg1 = PageFileChannel.createOrOpen(posIndexFilePath1);
+        PageFileChannel posSeg2 = PageFileChannel.createOrOpen(posIndexFilePath2);
+
+        int offsetForPos2 = posSeg1.getNumPages()*PageFileChannel.PAGE_SIZE;
+
+        for(int i = 0; i<posSeg1.getNumPages();i++){
+            ByteBuffer bf = posSeg2.readPage(i);
+            posSeg2.appendPage(bf);
+        }
+
+        posSeg1.close();
+        posSeg2.close();
+
+        File f1 = new File(this.indexFolder+"posIndex"+segNum1+".pos");
+        File f2 = new File(this.indexFolder+"posIndex"+mergedSegId+".pos");
+        if(!f1.renameTo(f2)){
+            throw new UnsupportedOperationException();
+        }
+
+        //merge inverted list
+        ByteArrayOutputStream dictionaryBuffer = new ByteArrayOutputStream();
+        ByteArrayOutputStream invertedListBuffer = new ByteArrayOutputStream();
+        ByteArrayOutputStream positionalListBuffer = new ByteArrayOutputStream();
+
+
+        //Open two segement file to merge
+        Path indexFilePath = Paths.get(this.indexFolder+"segment"+segNum1+".seg");
+        PageFileChannel segment1 = PageFileChannel.createOrOpen(indexFilePath);
+        indexFilePath = Paths.get(this.indexFolder+"segment"+segNum2+".seg");
+        PageFileChannel segment2 = PageFileChannel.createOrOpen(indexFilePath);
+        //create the mergedSegment
+        indexFilePath = Paths.get(this.indexFolder+"segment"+segNum1+"_tmp"+".seg");
+        PageFileChannel merged_segement = PageFileChannel.createOrOpen(indexFilePath);
+
+
+        TreeMap<String,int[]> dict1 = indexDicDecoder(segment1);
+        TreeMap<String,int[]> dict2 = indexDicDecoder(segment2);
+        TreeMap<String,List<int[]>> merged_dict = new TreeMap<>();
+
+        //get the information of two segement
+        ByteBuffer segInfo = ByteBuffer.allocate(PageFileChannel.PAGE_SIZE);
+        segInfo.put(segment1.readPage(0));
+        segInfo.rewind();
+        int seg1_sizeOfDictionary = segInfo.getInt();
+        int seg1_offset = segInfo.getInt();
+        segInfo = ByteBuffer.allocate(PageFileChannel.PAGE_SIZE);
+        segInfo.put(segment1.readPage(0));
+        segInfo.rewind();
+        int seg2_sizeOfDictionary = segInfo.getInt();
+        int seg2_offset = segInfo.getInt();
+
+        //Build the dictionary part
+        int sizeOfDictionary = 0;
+        int offset = seg1_sizeOfDictionary+seg2_sizeOfDictionary-8-4;//get rid of the duplicated metainfo
+
+
+        List<String> s1 =  new ArrayList<>(new TreeSet<>(dict1.keySet()));
+        //HashMap<String,Integer> listsSize= new HashMap<>();
+        //convert the length to full length
+        for(int i = 0; i < s1.size()-1;i++){
+            //listsSize.put(s1.get(i)+"1", dict1.get(s1.get(i+1))[0] - dict1.get(s1.get(i))[0]);
+
+            dict1.get(s1.get(i))[2] = 0;
+
+            if(merged_dict.containsKey(s1.get(i))){
+                merged_dict.get(s1.get(i)).add(dict1.get(s1.get(i)));
+            }
+
+            else{
+                sizeOfDictionary++;
+                List<int[]>tmp = new ArrayList<>();
+                tmp.add(dict1.get(s1.get(i)));
+                merged_dict.put(s1.get(i),tmp);
+            }
+        }
+
+        List<String> s2 =  new ArrayList<>(new TreeSet<>(dict2.keySet()));
+        //convert the length to full length
+        for(int i = 0; i < s2.size()-1;i++){
+            //listsSize.put(s2.get(i)+"2", dict2.get(s2.get(i+1))[0] - dict2.get(s2.get(i))[0]);
+            dict2.get(s2.get(i))[2] = 1;
+
+            if(merged_dict.containsKey(s2.get(i))){
+                merged_dict.get(s2.get(i)).add(dict2.get(s2.get(i)));
+            }
+
+            else{
+                sizeOfDictionary++;
+                List<int[]>tmp = new ArrayList<>();
+                tmp.add(dict2.get(s2.get(i)));
+                merged_dict.put(s2.get(i),tmp);
+            }
+
+        }
+
+        offset += (PageFileChannel.PAGE_SIZE - offset%PageFileChannel.PAGE_SIZE);
+
+        //insert empty dictionary part
+        merged_segement.appendAllBytes(ByteBuffer.allocate(offset));
+
+
+        HashMap<String,List<Integer>> listSize = new HashMap<>();
+
+        ByteBuffer page_tmp = ByteBuffer.allocate(PageFileChannel.PAGE_SIZE);
+
+        Iterator<List<byte[]>> chunk_it1 = this.SegmentChunkIterator(segment1);
+        Iterator<List<byte[]>> chunk_it2 = this.SegmentChunkIterator(segment2);
+
+        //offsetForPos2
+
+        for(Map.Entry<String,List<int[]>> entry:merged_dict.entrySet()){
+            System.out.println("Start merge for " + entry.getKey());
+
+            ByteBuffer lists = null;
+            int lists_size = -1;
+            int inverted_len = -1;
+
+            if(entry.getValue().size()==1){
+                if(entry.getValue().get(0)[2] == 0){
+                    //Insert k1
+                    List<byte[]> k1_list = chunk_it1.next();
+                    lists_size = k1_list.get(0).length + k1_list.get(1).length;
+                    inverted_len = k1_list.get(0).length;
+                    lists = ByteBuffer.allocate(lists_size);
+
+                    lists.put(k1_list.get(0));
+                    lists.put(k1_list.get(1));
+
+                }
+                else{
+                    List<byte[]> k2_list = chunk_it2.next();
+
+                    List<Integer> k2_invertList = compressor.decode(k2_list.get(0));
+                    //update the doc id for the second segment
+                    for(int i =0; i< k2_invertList.size();i++){
+                        k2_invertList.set(i,k2_invertList.get(i)+doc_counter);
+                    }
+                    k2_list.set(0,compressor.encode(k2_invertList));
+
+                    List<Integer> k2_offsets = compressor.decode(k2_list.get(1));
+                    //update the offset value for the second segment val
+                    for(int i =0; i< k2_offsets.size();i++){
+                        k2_offsets.set(i,k2_offsets.get(i)+offsetForPos2);
+                    }
+                    k2_list.set(1,compressor.encode(k2_offsets));
+
+                    lists_size = k2_list.get(0).length + k2_list.get(1).length;
+                    inverted_len = k2_list.get(0).length;
+                    lists = ByteBuffer.allocate(lists_size);
+
+                    lists.put(k2_list.get(0));
+                    lists.put(k2_list.get(1));
+                }
+            }
+            if(entry.getValue().size()==2){ // merged
+                if(entry.getValue().get(0)[2] != 0 || entry.getValue().get(1)[2] != 1){
+                    System.out.println("wtf merged list error!!!");
+                    throw new UnsupportedOperationException();
+                }
+                List<byte[]> k1_list = chunk_it1.next();
+                List<byte[]> k2_list = chunk_it2.next();
+
+                List<Integer> k1_invertList = compressor.decode(k1_list.get(0));
+                List<Integer> k2_invertList = compressor.decode(k2_list.get(0));
+                //update the doc id for the second segment
+                for(int i =0; i< k2_invertList.size();i++){
+                    k2_invertList.set(i,k2_invertList.get(i)+doc_counter);
+                }
+                k1_invertList.addAll(k2_invertList);
+
+                List<Integer> k1_offsets = compressor.decode(k1_list.get(1));
+                List<Integer> k2_offsets = compressor.decode(k2_list.get(1));
+                //update the offset value for the second segment val
+                for(int i =0; i< k2_offsets.size();i++){
+                    k2_offsets.set(i,k2_offsets.get(i)+offsetForPos2);
+                }
+                k1_offsets.addAll(k1_offsets);
+
+                k1_list.set(0,compressor.encode(k1_invertList));
+                k1_list.set(1,compressor.encode(k1_invertList));
+
+                lists_size = k1_list.get(0).length + k1_list.get(1).length;
+                inverted_len = k1_list.get(0).length;
+
+                lists = ByteBuffer.allocate(lists_size);
+
+                lists.put(k1_list.get(0));
+                lists.put(k1_list.get(1));
+
+            }
+
+            List<Integer> ls = Arrays.asList(inverted_len,lists_size);
+            listSize.put(entry.getKey(),ls);
+
+            lists.rewind();
+
+            if(page_tmp.position()+lists_size < page_tmp.capacity()){
+                page_tmp.put(lists);
+            }
+            else {
+                int sizeForCurPage = (PageFileChannel.PAGE_SIZE - page_tmp.position());
+                lists.position(0);
+                lists.limit(sizeForCurPage);
+                page_tmp.put(lists);
+
+                //System.out.println("Special case: sizeForCur->" + sizeForCurPage);
+
+                merged_segement.appendPage(page_tmp);
+                page_tmp = ByteBuffer.allocate(PageFileChannel.PAGE_SIZE);
+
+
+                //re-adjust the posting list
+                lists.rewind();
+                lists.position(sizeForCurPage);
+
+                int sizeForNextPage = lists_size - sizeForCurPage;
+                //System.out.println("Special case: sizeForNext->" + sizeForNextPage);
+
+                while (sizeForNextPage > 0) {
+                    int write_size = PageFileChannel.PAGE_SIZE;
+                    if (sizeForNextPage < write_size) {
+                        write_size = sizeForNextPage;
+                    }
+                    if (lists.position() + write_size < lists.capacity()) {
+                        lists.limit(lists.position() + write_size);
+                    } else {
+                        lists.limit(lists.capacity());
+                    }
+                    //System.out.println("PostingList: position " + postingList.position() + " Limit " + postingList.limit());
+                    page_tmp.put(lists);
+                    if (page_tmp.position() == page_tmp.capacity()) {
+                        merged_segement.appendPage(page_tmp);
+                        page_tmp = ByteBuffer.allocate(PageFileChannel.PAGE_SIZE);
+                    }
+                    lists.position(lists.limit());
+                    sizeForNextPage -= write_size;
+                }
+            }
+        }
+
+        //If there is any remaining bytes not add into disk
+        if(page_tmp.position()>0){
+            merged_segement.appendPage(page_tmp);
+        }
+
+
+
+        //count how many page it used for offset
+        int head_page_size = offset/PageFileChannel.PAGE_SIZE;
+        System.out.println("Offset is :" + offset);
+        ByteBuffer dict_part = ByteBuffer.allocate(head_page_size*PageFileChannel.PAGE_SIZE);
+
+        dict_part.putInt(sizeOfDictionary);
+        dict_part.putInt(offset);
+
+        for(Map.Entry<String,List<int[]>> entry:merged_dict.entrySet()){
+            try {
+
+                dict_part.putInt(entry.getKey().getBytes(StandardCharsets.UTF_8).length);
+                dict_part.put(entry.getKey().getBytes(StandardCharsets.UTF_8));
+                dict_part.putInt(offset);
+
+                //compute the length of new list
+                dict_part.putInt(listSize.get(entry.getKey()).get(0));
+
+                offset += listSize.get(entry.getKey()).get(1);
+            }
+            catch (Exception e){
+                e.printStackTrace();
+            }
+        }
+        dict_part.putInt(offset);
+
+
+        for(int i =0; i< head_page_size; i++){
+            dict_part.rewind();
+            dict_part.position(i*PageFileChannel.PAGE_SIZE);
+            dict_part.limit((i+1)*PageFileChannel.PAGE_SIZE);
+            System.out.println(dict_part.capacity());
+            System.out.println(dict_part.position());
+            System.out.println(dict_part.limit());
+            byte[] tmp = new byte[PageFileChannel.PAGE_SIZE];
+            dict_part.get(tmp);
+            merged_segement.writePage(i,ByteBuffer.wrap(tmp));
+        }
+
+        updateSegementDocFile(segNum1,mergedSegId);
+        this.segmentCounter--;
 
     }
 
@@ -1057,7 +1385,7 @@ public class InvertedIndexManager {
     public int getNumSegments() {
         File file = new File(this.indexFolder);
         String[] filelist = file.list();
-        if(this.segmentCounter != (filelist.length/2)){
+        if(this.segmentCounter != (filelist.length/3)){
             //System.out.println("get segment wrong!");
             return -1;
         }
@@ -1262,6 +1590,7 @@ public class InvertedIndexManager {
 
         TreeMap<String,int[]> dict = indexDicDecoder(segment);
         for(Map.Entry<String,int[]>entry:dict.entrySet()) {
+            if(entry.getValue().length==1){continue;}
             invertedList.put(entry.getKey(), indexListDecoder(entry.getValue(), segment));
         }
 
@@ -1342,7 +1671,7 @@ public class InvertedIndexManager {
         int doc_offset = segInfo.getInt();
         int page_num = doc_offset/PageFileChannel.PAGE_SIZE;
 
-        System.out.println("KeyNum: "+key_num+" docOffset: "+ doc_offset + " pageNum: "+page_num);
+        //System.out.println("KeyNum: "+key_num+" docOffset: "+ doc_offset + " pageNum: "+page_num);
 
         ByteBuffer dic_content = ByteBuffer.allocate((page_num+1)*PageFileChannel.PAGE_SIZE).put(segInfo);
 
@@ -1364,17 +1693,19 @@ public class InvertedIndexManager {
             dict.put(tmp_key,key_info);
             key_num--;
 
+            /*
             System.out.println("Read: keyLength: "+ key_length);
             System.out.println("Read: Key: "+ tmp_key);
             System.out.println("Read: Offset: "+ key_info[0]);
-            System.out.println("Read: Length: "+ key_info[1]);
+            System.out.println("Read: Length: "+ key_info[1]);*/
         }
 
-        int[] keyinfo = new int[1];
-        keyinfo[0] = dic_content.getInt();
-        System.out.println("The last offset is " + keyinfo[0]);
-        dict.put("zzzzzzzzzzzzzzzzzz",keyinfo);
-
+        if(hasPosIndex) {
+            int[] keyinfo = new int[1];
+            keyinfo[0] = dic_content.getInt();
+            //System.out.println("The last offset is " + keyinfo[0]);
+            dict.put("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz", keyinfo);
+        }
         return dict;
     }
 
@@ -1568,6 +1899,12 @@ public class InvertedIndexManager {
 
     public static void main(String[] args) throws Exception {
         hashMapTest();
+
+        int a = 1;
+
+        int b = a<2? 0:1;
+
+        System.out.println(b);
     }
 
 }
