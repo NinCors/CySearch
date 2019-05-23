@@ -1,6 +1,8 @@
 package edu.uci.ics.cs221.index.inverted;
 
 import com.google.common.base.Preconditions;
+import com.google.common.collect.Table;
+import com.google.common.collect.TreeBasedTable;
 import edu.uci.ics.cs221.analysis.Analyzer;
 import edu.uci.ics.cs221.storage.Document;
 import edu.uci.ics.cs221.storage.DocumentStore;
@@ -25,27 +27,54 @@ import java.util.*;
  *          1. insert document to document store
  *          2. Tokenize the document and analyze it to get a list of word
  *          3. For each word in the list:
- *              append it to hashmap with the format <word, current docID> if not exist.
+ *              1. Append it to hashmap with the format <word, current docID> if not exist.
  *              Otherwise, just append the current DocId to it.
+ *              2. Append it to table with the format <word,docId,list<Integer>> if not exist.
+ *              Otherwise, just append the current Position to it.
  *          4. Increase DocID.
  *      When the DocID reaches the DEFAULT_FLUSH_THRESHOLD -> flush():
- *          1. DocID = 0;
+ *          1. check if DocID = 0;
  *          2. Create the segment<x> file
  *          3. Flush it to disk:
- *              Format: sizeOfDictionary +sizeOfDocument + dictionary(wordLength+word+offset+length) + eachList
+ *              Format: dictPart: numOfKeyWord + sizeOfDictPart + dictionary(wordLength+word+offset+length) + endOffset
+ *                      ListParts: invertedList + Position_Offset_list
+ *             Also flush the table in to position index
  *          4. Segment number++
  *          5. Create new document store file based on Segment
  *          6. Clear hashmap
+ *          7. Clear table
  *      When the number of segment is even -> merge() all:
  *          1. For segment i from segment 1 to the number of segment
  *          2. Merge segment i with segment i-1:
  *              1. Fetch the dictionaries from both segment:
- *              2. Use two pointers to access key words from dictionaries in order.
+ *              2. Combine two dictionaries together.
  *              3. If the keywords not equal:
- *                  Fetch the larger keywords lists to memory, and insert it to the new merged file
+ *                  Use iterator to get the data chunk:
+ *                  Fetch the smaller keywords inverted and offset lists to memory,
+ *                  and insert the it to the new merged segment file.
+ *                  For each offset in offset list:
+ *                      extract it from positional list
+ *                      write it into new merged positional file
+ *
  *              4. If the keywords are equal:
- *                  Fetch both list and merge them to one, then insert it to the new merged file
+ *                    Use iterator to get the data chunk:
+ *                      Based on the offset, length, Fetch both inverted list and merge them to one,
+ *                      Based on the offset+length, next_offset,Fetch both offset list, convert the offsetnumber, and merge them to one
+ *                      Use iterator to ge the data chunk of each positional index:
+ *                          keep merge them into one segment
+ *
+ *                      then insert it to the new merged file
  *              5. Decrease the segment number when finish one pair
+ *
+ *      Phase search:
+ *          1. get a list of common document ID from AND search
+ *          2. For each common docID:
+ *                  For each search key k1,k2,k3:
+ *                      extract the position index of k1 in positional index:
+ *                      extract the position index of k2 in positional index:
+ *                          for each positional index of k1:
+ *                              check if there exists an +1 in the positional index of k2
+ *                              if there is
  *
  *
  * Todo:
@@ -74,13 +103,15 @@ public class InvertedIndexManager {
      * In test cases, the default merge threshold could possibly be set to any number.
      */
     public static int DEFAULT_MERGE_THRESHOLD = 8;
-    public static boolean hasPosIndex = true;
 
 
+    private boolean hasPosIndex;
     private TreeMap<String,List<Integer>> SEGMENT_BUFFER;
     private TreeMap<Integer,Document> DOCSTORE_BUFFER;
+    private TreeBasedTable<String, Integer, List<Integer>> POS_BUFFER;
+
     private Analyzer analyzer;
-    private DeltaVarLenCompressor compressor = new DeltaVarLenCompressor();
+    private Compressor compressor;
     private int docCounter;
     private int segmentCounter;
     protected String indexFolder;
@@ -97,6 +128,22 @@ public class InvertedIndexManager {
         this.DOCSTORE_BUFFER = new TreeMap<>();
         this.SEGMENT_BUFFER = new TreeMap<>();
         this.analyzer = analyzer;
+        this.hasPosIndex = false;
+    }
+
+    private InvertedIndexManager(String indexFolder, Analyzer analyzer, Compressor compressor) {
+        docCounter = 0;
+        segmentCounter =0;
+        if(indexFolder.charAt(indexFolder.length()-1) != '/'){
+            indexFolder += '/';
+        }
+        this.indexFolder = indexFolder;
+        this.DOCSTORE_BUFFER = new TreeMap<>();
+        this.SEGMENT_BUFFER = new TreeMap<>();
+        this.analyzer = analyzer;
+        this.compressor = compressor;
+        this.POS_BUFFER = TreeBasedTable.create();
+        this.hasPosIndex = true;
     }
 
     /**
@@ -125,22 +172,40 @@ public class InvertedIndexManager {
      * Creates a positional index with the given folder, analyzer, and the compressor.
      * Compressor must be used to compress the inverted lists and the position lists.
      *
+     *
+     *
      */
     public static InvertedIndexManager createOrOpenPositional(String indexFolder, Analyzer analyzer, Compressor compressor) {
-        hasPosIndex = true;
-        throw new UnsupportedOperationException();
+        try {
+            Path indexFolderPath = Paths.get(indexFolder);
+            if (Files.exists(indexFolderPath) && Files.isDirectory(indexFolderPath)) {
+                if (Files.isDirectory(indexFolderPath)) {
+                    return new InvertedIndexManager(indexFolder, analyzer,compressor);
+                } else {
+                    throw new RuntimeException(indexFolderPath + " already exists and is not a directory");
+                }
+            } else {
+                Files.createDirectories(indexFolderPath);
+                return new InvertedIndexManager(indexFolder, analyzer,compressor);
+            }
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 
 
 
     /**
      * Adds a document to the inverted index.
-     *     1.Insert document to document store
-     *     2.Tokenize the document and analyze it to get a list of word
-     *     3.For each word in the list:
-     *         Append it to hashmap with the format <word, current docID> if not exist.
-     *         Otherwise, just append the current DocId to it.
-     *     4.Increase DocID.
+     *      While adding document:
+     *          1. insert document to document store
+     *          2. Tokenize the document and analyze it to get a list of word
+     *          3. For each word in the list:
+     *              1. Append it to hashmap with the format <word, current docID> if not exist.
+     *              Otherwise, just append the current DocId to it.
+     *              2. Append it to table with the format <word,docId,list<Integer>> if not exist.
+     *              Otherwise, just append the current Position to it.
+     *          4. Increase DocID.
      * Document should live in a in-memory buffer until `flush()` is called to write the segment to disk.
      * @param document
      */
@@ -148,7 +213,8 @@ public class InvertedIndexManager {
 
         List<String> words = this.analyzer.analyze(document.getText());
         DOCSTORE_BUFFER.put(this.docCounter, document);
-        for(String word:words){
+        for(int i =0;i<words.size();i++){
+            String word = words.get(i);
             if(word!="") {
                 if (this.SEGMENT_BUFFER.containsKey(word)) {
                     this.SEGMENT_BUFFER.get(word).add(this.docCounter);
@@ -156,6 +222,18 @@ public class InvertedIndexManager {
                     List<Integer> tmp = new ArrayList<>();
                     tmp.add(this.docCounter);
                     this.SEGMENT_BUFFER.put(word, tmp);
+                }
+
+                if(hasPosIndex){
+                    if(this.POS_BUFFER.contains(word,this.docCounter)){
+                        this.POS_BUFFER.get(word,this.docCounter).add(i);
+                    }
+                    else{
+                        List<Integer> tmp = new ArrayList<>();
+                        tmp.add(i);
+                        this.POS_BUFFER.put(word,this.docCounter,tmp);
+                    }
+
                 }
             }
         }
@@ -169,13 +247,17 @@ public class InvertedIndexManager {
     /**
      * Flushes all the documents in the in-memory segment buffer to disk. If the buffer is empty, it should not do anything.
      * flush() writes the segment to disk containing the posting list and the corresponding document store.
-     * When the DocID reaches the DEFAULT_FLUSH_THRESHOLD -> flush():
-     *          1. DocID = 0;
+     *      When the DocID reaches the DEFAULT_FLUSH_THRESHOLD -> flush():
+     *          1. check if DocID = 0;
      *          2. Create the segment<x> file
      *          3. Flush it to disk:
-     *              Format: sizeOfDictionary +sizeOfDocument + dictionary(wordLength+word+offset+length) + eachList
+     *              Format: dictPart: numOfKeyWord + sizeOfDictPart + dictionary(wordLength+word+offset+length) + endOffset
+     *                      ListParts: invertedList + Position_Offset_list
+     *             Also flush the table in to position index
      *          4. Segment number++
      *          5. Create new document store file based on Segment
+     *          6. Clear hashmap
+     *          7. Clear table
      */
     public void flush() {
         //System.out.println(this.SEGMENT_BUFFER);
@@ -318,26 +400,32 @@ public class InvertedIndexManager {
     public void flushWithPos(){
 
         System.out.println("Current segment buffer is " + this.SEGMENT_BUFFER.toString());
+        System.out.println("Current position buffer is " + this.POS_BUFFER.toString());
 
 
         ByteArrayOutputStream invertedListBuffer = new ByteArrayOutputStream();
+        ByteArrayOutputStream posListBuffer = new ByteArrayOutputStream();
 
-        //Open segment file
-        if(this.docCounter == 0){
-            return;
-        }
+        //Create the segement file
         Path indexFilePath = Paths.get(this.indexFolder+"segment"+segmentCounter+".seg");
         PageFileChannel segment = PageFileChannel.createOrOpen(indexFilePath);
+
+        //Create the positional index file
+        Path posIndexFilePath = Paths.get(this.indexFolder+"posIndex"+segmentCounter+".pos");
+        PageFileChannel posIndexSeg = PageFileChannel.createOrOpen(posIndexFilePath);
+
         //get sorted key from the segment buffer
         Set<String> keys = this.SEGMENT_BUFFER.keySet();
 
         //calculate the estimated size of the dictionary part
-        int dic_size = 8;// sizeofDictionary + DocumentOffset
-        int list_size = 0;
+        int dic_size = 8;// numberOfKey + SizeOfDictPart
+
         for(String key:keys){
             dic_size += (12+key.getBytes(StandardCharsets.UTF_8).length);//offset,listLength,keyLength+real key;
-
         }
+
+        dic_size += 4; // the end of all the file
+
         ByteBuffer dict_part = ByteBuffer.allocate(dic_size+PageFileChannel.PAGE_SIZE - dic_size%PageFileChannel.PAGE_SIZE);
         dict_part.putInt(keys.size());
         dict_part.putInt(dic_size);
@@ -346,34 +434,57 @@ public class InvertedIndexManager {
         dic_size += (PageFileChannel.PAGE_SIZE - dic_size%PageFileChannel.PAGE_SIZE);
         System.out.println("Size of list start is : " + dic_size);
 
+        int posIndexOffset = 0;
 
         //build the dictionary part
+        //For each key, add its docID to inverted list
+        //For each posID of one key and docID, add it to the positional list, and record the offset
         for(String key:keys){
-            byte[] compressed_tmp = this.compressor.encode(this.SEGMENT_BUFFER.get(key));
-
             try {
-                invertedListBuffer.write(compressed_tmp);
 
+                List<Integer> offsetList = new ArrayList<>();
+                List<Integer> docIds = this.SEGMENT_BUFFER.get(key);
+
+
+                for(Integer docId:docIds){
+                    offsetList.add(posIndexOffset);
+                    byte[] compressed_posId = this.compressor.encode(this.POS_BUFFER.get(key,docId));
+                    posListBuffer.write(compressed_posId);
+                    posIndexOffset += compressed_posId.length;
+                }
+
+                offsetList.add(posIndexOffset); //add the listEndOffset
+
+                byte[] compressed_docId = this.compressor.encode(docIds);
+                byte[] compressed_offsetList = this.compressor.encode(offsetList);
+                invertedListBuffer.write(compressed_docId);
+                invertedListBuffer.write(compressed_offsetList);
+
+
+                dict_part.putInt(key.getBytes(StandardCharsets.UTF_8).length);
+                dict_part.put(key.getBytes(StandardCharsets.UTF_8));
+                dict_part.putInt(dic_size);
+                dict_part.putInt(compressed_docId.length);//only save the length of docID list
+                dic_size+=(compressed_docId.length+compressed_offsetList.length);
+
+                System.out.println(key + " : "+ offsetList.toString());
             }
             catch (Exception e){
                 e.printStackTrace();
             }
-
-            dict_part.putInt(key.getBytes(StandardCharsets.UTF_8).length);
-            dict_part.put(key.getBytes(StandardCharsets.UTF_8));
-            dict_part.putInt(dic_size);
-            dict_part.putInt(compressed_tmp.length);
-
-            dic_size+=compressed_tmp.length;
         }
-        System.out.println("Size of list end is : " + dic_size);
+        dict_part.putInt(dic_size);//add the endListPos
+        dict_part.rewind();
+        //System.out.println("Size of list end is : " + dic_size);
 
+        //write the dictionary part + <InvertedList + PositionOffsetList> into segement file
         segment.appendAllBytes(dict_part);
-
-        //ByteBuffer bf = ByteBuffer.allocate(PageFileChannel.PAGE_SIZE);
-        //bf.put(invertedListBuffer.toByteArray());
-        //bf.rewind();
         segment.appendAllBytes(ByteBuffer.wrap(invertedListBuffer.toByteArray()));
+
+
+        //write the positional index in to positional Index file
+        posIndexSeg.appendAllBytes(ByteBuffer.wrap(posListBuffer.toByteArray()));
+
 
         //write the document store file
         DocumentStore ds = MapdbDocStore.createWithBulkLoad(this.indexFolder+"doc"+this.segmentCounter+".db",this.DOCSTORE_BUFFER.entrySet().iterator());
@@ -381,6 +492,7 @@ public class InvertedIndexManager {
         //Ready for next segment
         segment.close();
         ds.close();
+        posIndexSeg.close();
         this.segmentCounter++;
         this.DOCSTORE_BUFFER.clear();
         this.SEGMENT_BUFFER.clear();
@@ -428,12 +540,18 @@ public class InvertedIndexManager {
      *          1. For segment i from segment 1 to the number of segment
      *          2. Merge segment i with segment i-1:
      *              1. Fetch the dictionaries from both segment:
-     *              2. Use two pointers to access key words from dictionaries in order.
+     *              2. Combine two dictionaries together.
      *              3. If the keywords not equal:
      *                  Fetch the larger keywords lists to memory, and insert it to the new merged file
-     *                4. If the keywords are equal:
-     *                    Fetch both list and merge them to one, then insert it to the new merged file
-     *                5. Decrease the segment number when finish one pair
+     *              4. If the keywords are equal:
+     *                    Use iterator to get the data chunk:
+     *                      Based on the offset, length, Fetch both inverted list and merge them to one,
+     *                      Based on the offset+length, next_offset,Fetch both offset list, convert the offsetnumber, and merge them to one
+     *                      Use iterator to ge the data chunk of each positional index:
+     *                          keep merge them into one segment
+     *
+     *                      then insert it to the new merged file
+     *              5. Decrease the segment number when finish one pair
      */
 
     public void mergeAndflush(int segNum1,int segNum2,int mergedSegId){
@@ -642,7 +760,6 @@ public class InvertedIndexManager {
             mergedSegId++;
         }
     }
-
 
 
     /**
@@ -947,7 +1064,6 @@ public class InvertedIndexManager {
         return this.segmentCounter;
     }
 
-
     /**
      * Reads a disk segment of a positional index into memory based on segmentNum.
      * This function is mainly used for checking correctness in test cases.
@@ -958,8 +1074,172 @@ public class InvertedIndexManager {
      * @return in-memory data structure with all contents in the index segment, null if segmentNum don't exist.
      */
     public PositionalIndexSegmentForTest getIndexSegmentPositional(int segmentNum) {
-        throw new UnsupportedOperationException();
+        File seg = new File(indexFolder+"segment"+segmentNum+".seg");
+        File doc = new File(indexFolder+"doc"+segmentNum+".db");
+        File pos = new File(this.indexFolder+"posIndex"+segmentNum+".pos");
+
+        if (!doc.exists()||!seg.exists()||!pos.exists()) {
+            System.out.println("No file?");
+            return null;}
+
+        Path indexFilePath = Paths.get(this.indexFolder+"segment"+segmentNum+".seg");
+        PageFileChannel segment = PageFileChannel.createOrOpen(indexFilePath);
+        Path posFilePath = Paths.get(this.indexFolder+"posIndex"+segmentNum+".pos");
+        PageFileChannel posSeg = PageFileChannel.createOrOpen(posFilePath);
+
+
+        Iterator<List<byte[]>> segmentIterator = SegmentChunkIterator(segment);
+
+
+        TreeMap<String, List<Integer>> invertedLists = new TreeMap<>();
+        TreeMap<Integer, Document> documents = new TreeMap<>();
+        TreeBasedTable<String, Integer, List<Integer>> positions = TreeBasedTable.create();
+
+        TreeMap<String,int[]> dict = indexDicDecoder(segment);
+        TreeSet<String> dict_set = new TreeSet<>(dict.keySet());
+
+        System.out.println("Start decoding the whole shit !");
+        for(String key:dict_set){
+            if(dict.get(key).length == 1){continue;}
+            List<byte[]> chunk = segmentIterator.next();
+            List<Integer> inverList = compressor.decode(chunk.get(0));
+            invertedLists.put(key,inverList);
+            List<Integer> offsetList = compressor.decode(chunk.get(1));
+
+            System.out.println("For key : " + key );
+            System.out.println("Inverted index :" + inverList.toString());
+            System.out.println("Offset Index : is " + offsetList.toString());
+
+            for(int i =0; i< offsetList.size()-1; i++){
+                List<Integer> posIndex = decodePositionalIndex(offsetList.get(i),offsetList.get(i+1),posSeg);
+                System.out.println("Doc: " + inverList.get(i)+" Positional Index : is " + posIndex.toString());
+                positions.put(key,inverList.get(i),posIndex);
+            }
+        }
+        segment.close();
+        posSeg.close();
+
+        DocumentStore ds = MapdbDocStore.createOrOpen(indexFolder+"doc"+segmentNum+".db");
+        Iterator<Map.Entry<Integer,Document>> it = ds.iterator();
+
+        while(it.hasNext()){
+            Map.Entry<Integer,Document> entry =it.next();
+            documents.put(entry.getKey(),entry.getValue());
+        }
+        ds.close();
+
+        return new PositionalIndexSegmentForTest(invertedLists,documents,positions);
     }
+
+    public List<Integer> decodePositionalIndex(int start, int end, PageFileChannel segment){
+        //System.out.println("Decoding "+start + " "+ end);
+        List<Integer> res = new ArrayList<>();
+
+        int startPageNum = start/PageFileChannel.PAGE_SIZE;
+        int pageOffset = start%PageFileChannel.PAGE_SIZE;
+        int finishPageNum = end/PageFileChannel.PAGE_SIZE;
+
+
+        ByteBuffer list_buffer = ByteBuffer.allocate((finishPageNum-startPageNum+1)*PageFileChannel.PAGE_SIZE);
+
+        for(int i = startPageNum; i<=finishPageNum;i++){
+            list_buffer.put(segment.readPage(i));
+        }
+
+        list_buffer.position(pageOffset);
+
+        byte[] bytes = new byte[end-start];
+        list_buffer.get(bytes);
+        return compressor.decode(bytes,0,end-start);
+    }
+
+
+    /**
+     * Keep return the data chunk of one key in one segment
+     * Get the dictionary of one segement first
+     *
+     * @param segment n-th segment in the inverted index to be loop
+     * @return byte[], the data chunk that contains <InvertedList, offsetList>
+     */
+
+    public Iterator<List<byte[]>> SegmentChunkIterator(PageFileChannel segment) {
+        Iterator<List<byte[]>> it = new Iterator<List<byte[]>>() {
+            int prePageNum=-1;
+            ByteBuffer prePage = null;
+            //TreeMap<String,int[]> dict = null;
+            Iterator<Map.Entry<String,int[]>> it = null;
+            Map.Entry<String,int[]> pre = null;
+            Map.Entry<String,int[]> cur = null;
+
+            public void init(){
+                it = indexDicDecoder(segment).entrySet().iterator();
+                prePage = ByteBuffer.allocate(PageFileChannel.PAGE_SIZE);
+                if(it.hasNext()) {
+                    pre = it.next();
+                }
+                prePageNum = pre.getValue()[0]/PageFileChannel.PAGE_SIZE;
+                prePage = segment.readPage(prePageNum);
+                prePage.rewind();
+            }
+
+            @Override
+            public boolean hasNext() {
+                if(it ==null){
+                    init();
+                }
+                if(it.hasNext()){
+                    return true;
+                }
+                return false;
+            }
+
+            @Override
+            public List<byte[]> next() {
+                if(!hasNext()){return null;}
+
+                /**
+                 * Pre: offset_pre + length
+                 * Cur: offset_cur + length
+                 * Extract the datachunk between offset_pre to offset_cur
+                 */
+                cur = it.next();
+                System.out.println("Cur "+cur.toString()+" "+ cur.getValue()[0]);
+                System.out.println("Pre "+pre.toString()+ " " + pre.getValue()[0]);
+                int startPageNum = pre.getValue()[0]/PageFileChannel.PAGE_SIZE;
+                int pageOffset = pre.getValue()[0]%PageFileChannel.PAGE_SIZE;
+
+                int finishPageNum = cur.getValue()[0]/PageFileChannel.PAGE_SIZE;
+
+                ByteBuffer dataChunk = ByteBuffer.allocate((finishPageNum-startPageNum+1)*PageFileChannel.PAGE_SIZE).put(prePage);
+
+                for(int i = startPageNum+1; i<=finishPageNum;i++){
+                    prePage = segment.readPage(i);
+                    prePage.rewind();
+                    dataChunk.put(prePage);
+                }
+                //the target data are in the range[page offset, page offset + length]
+                //length = offset_cur - offset_pre
+                dataChunk.position(pageOffset);
+                dataChunk.limit(pageOffset+(cur.getValue()[0]-pre.getValue()[0]));
+
+                byte[] invertedList = new byte[pre.getValue()[1]]; // get the inverted list
+                byte[] offsetList = new byte[cur.getValue()[0] - pre.getValue()[0] - pre.getValue()[1]]; //get the offset list
+                dataChunk.get(invertedList);
+                dataChunk.get(offsetList);
+
+                pre = cur;
+                prePage.rewind();
+
+                return Arrays.asList(invertedList,offsetList);
+
+            }
+
+        };
+
+        return it;
+
+    }
+
 
 
     /**
@@ -1030,8 +1310,6 @@ public class InvertedIndexManager {
         }
         list_buffer.position(pageOffset);
 
-
-
         if(hasPosIndex) {
             byte[] bytes = new byte[keyInfo[1]];
             list_buffer.get(bytes);
@@ -1063,7 +1341,8 @@ public class InvertedIndexManager {
         int key_num = segInfo.getInt();
         int doc_offset = segInfo.getInt();
         int page_num = doc_offset/PageFileChannel.PAGE_SIZE;
-        //System.out.println("KeyNum: "+key_num+" docOffset: "+ doc_offset + " pageNum: "+page_num);
+
+        System.out.println("KeyNum: "+key_num+" docOffset: "+ doc_offset + " pageNum: "+page_num);
 
         ByteBuffer dic_content = ByteBuffer.allocate((page_num+1)*PageFileChannel.PAGE_SIZE).put(segInfo);
 
@@ -1085,12 +1364,16 @@ public class InvertedIndexManager {
             dict.put(tmp_key,key_info);
             key_num--;
 
-            //System.out.println("Read: keyLength: "+ key_length);
-            //System.out.println("Read: Key: "+ tmp_key);
-            //System.out.println("Read: Offset: "+ key_info[0]);
-            //System.out.println("Read: Length: "+ key_info[1]);
-
+            System.out.println("Read: keyLength: "+ key_length);
+            System.out.println("Read: Key: "+ tmp_key);
+            System.out.println("Read: Offset: "+ key_info[0]);
+            System.out.println("Read: Length: "+ key_info[1]);
         }
+
+        int[] keyinfo = new int[1];
+        keyinfo[0] = dic_content.getInt();
+        System.out.println("The last offset is " + keyinfo[0]);
+        dict.put("zzzzzzzzzzzzzzzzzz",keyinfo);
 
         return dict;
     }
@@ -1119,7 +1402,8 @@ public class InvertedIndexManager {
         mt.put("a",1);
         mt.put("c",4);
         mt.put("b",2);
-        mt.put("d",3);
+        mt.put("hellp",3);
+        mt.put("zzzzzzzzzzzzzzzz",3);
 
         TreeMap<String, Integer> mt1 = mt;
 
@@ -1267,9 +1551,23 @@ public class InvertedIndexManager {
 
     }
 
+    public static void tableTest(){
+        TreeBasedTable<String, Integer, List<Integer>> POS_BUFFER = TreeBasedTable.create();
+
+        POS_BUFFER.put("key",1,Arrays.asList(1,2,3));
+        POS_BUFFER.put("key2",1,Arrays.asList(1,2,3));
+
+        if(POS_BUFFER.contains("keyasd",1)){
+            System.out.println("oh yeah");
+        }
+
+        System.out.println(POS_BUFFER.toString());
+
+
+    }
 
     public static void main(String[] args) throws Exception {
-        ByteOutPutStream();
+        hashMapTest();
     }
 
 }

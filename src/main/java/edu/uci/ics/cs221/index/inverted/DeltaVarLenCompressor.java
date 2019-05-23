@@ -11,7 +11,7 @@ import java.util.Random;
  * Implement this compressor with Delta Encoding and Variable-Length Encoding.
  * See Project 3 description for details.
  */
-public class DeltaVarLenCompressor {
+public class DeltaVarLenCompressor implements Compressor{
 
     //@Override
     public byte[] encode(List<Integer> integers) {
@@ -77,6 +77,7 @@ public class DeltaVarLenCompressor {
 
         return res;
     }
+
 
 
     public static byte[] encode_one(int num){
