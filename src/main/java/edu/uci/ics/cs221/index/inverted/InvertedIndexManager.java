@@ -1,15 +1,12 @@
 package edu.uci.ics.cs221.index.inverted;
 
 import com.google.common.base.Preconditions;
-import com.google.common.collect.Table;
 import com.google.common.collect.TreeBasedTable;
-import com.sun.source.util.Trees;
 import edu.uci.ics.cs221.analysis.Analyzer;
 import edu.uci.ics.cs221.storage.Document;
 import edu.uci.ics.cs221.storage.DocumentStore;
 import edu.uci.ics.cs221.storage.MapdbDocStore;
-import org.omg.CORBA.PUBLIC_MEMBER;
-import org.omg.Messaging.SYNC_WITH_TRANSPORT;
+
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -1659,10 +1656,12 @@ public class InvertedIndexManager {
             System.out.println("OFFset size is : " + offsetList.size());
             */
 
+            Iterator<List<Integer>> posIndexIter = posIndexIteratorForOneKey(posSeg,offsetList);
+
             for(int i =0; i< inverList.size(); i++){
-                List<Integer> posIndex = decodePositionalIndex(offsetList.get(i*2),offsetList.get(i*2+1),posSeg);
+                //List<Integer> posIndex = decodePositionalIndex(offsetList.get(i*2),offsetList.get(i*2+1),posSeg);
                 //System.out.println("Doc: " + inverList.get(i)+" Positional Index : is " + posIndex.toString());
-                positions.put(key,inverList.get(i),posIndex);
+                positions.put(key,inverList.get(i),posIndexIter.next());
             }
         }
         segment.close();
@@ -1701,6 +1700,82 @@ public class InvertedIndexManager {
         list_buffer.get(bytes);
         return compressor.decode(bytes,0,end-start);
     }
+
+
+
+    /**
+     * Keep return the posIndex for one docID
+     */
+    public Iterator<List<Integer>> posIndexIteratorForOneKey(PageFileChannel segment, List<Integer> offsetList){
+        Iterator<List<Integer>> it = new Iterator<List<Integer>>() {
+            int prePageNum = -1;
+            ByteBuffer prePage = null;
+
+            Iterator<Integer> it = null;
+
+            private boolean init(){
+                it = offsetList.iterator();
+                if(!it.hasNext()){return false;}
+
+                prePage = segment.readPage(0);
+                prePageNum = 1;
+
+                return true;
+            }
+
+            @Override
+            public boolean hasNext() {
+                if(it == null){
+                    if(!init()){
+                        return false;
+                    }
+                }
+                return it.hasNext();
+
+            }
+
+            @Override
+            public List<Integer> next() {
+                if(!hasNext()){return null;}
+
+                int start = it.next();
+                int end = it.next();
+
+                int startPageNum = start/PageFileChannel.PAGE_SIZE;
+                int pageOffset = start%PageFileChannel.PAGE_SIZE;
+
+                int finishPageNum = end/PageFileChannel.PAGE_SIZE;
+
+                ByteBuffer dataChunk = ByteBuffer.allocate((finishPageNum-startPageNum+1)*PageFileChannel.PAGE_SIZE);
+
+                if(startPageNum == prePageNum){
+                    dataChunk.put(prePage);
+                    startPageNum++;
+                }
+
+                for(int i = startPageNum; i<=finishPageNum;i++){
+                    prePage = segment.readPage(i);
+                    prePage.rewind();
+                    dataChunk.put(prePage);
+                }
+
+                dataChunk.position(pageOffset);
+                dataChunk.limit(pageOffset+(end-start));
+
+                byte[] positionalIndex = new byte[end-start];
+
+                dataChunk.get(positionalIndex);
+
+                prePageNum = finishPageNum;
+                prePage.rewind();
+
+                return compressor.decode(positionalIndex);
+            }
+        };
+
+        return it;
+    }
+
 
 
     /**
@@ -2120,9 +2195,9 @@ public class InvertedIndexManager {
     public static void main(String[] args) throws Exception {
         hashMapTest();
 
-        int a = 1;
+        double a = 0.0/0.0;
 
-        int b = a<2? 0:1;
+        int b = a> (double)(2/3)? 0:1;
 
         System.out.println(b);
     }
