@@ -1204,7 +1204,7 @@ public class InvertedIndexManager {
                     boolean find = false;
 
                     for(String key:keywords){
-                        if(key.length()==0 || dict.get(key).length==1){continue;}
+                        if(key.length()==0){continue;}
                         key = analyzer.analyze(key).get(0);
                         if(!dict.containsKey(key)){
                             find = false;
@@ -1406,7 +1406,7 @@ public class InvertedIndexManager {
             }
         };
 
-
+        it.hasNext();
         return it;
     }
 
@@ -1443,6 +1443,7 @@ public class InvertedIndexManager {
         }
         if(!find) {
             segment.close();
+            posIndexSeg.close();
             //System.out.println(cur_seg_num + " seg : does not contain all the keys" );
             return null;
         }
@@ -1509,12 +1510,13 @@ public class InvertedIndexManager {
             }
         }
 
+        segment.close();
+        posIndexSeg.close();
+
         if(res.size() == 0){
             //System.out.println("Have common id but no right position");
             return null;
         }
-
-        //System.out.println("Find id : " + res.toString());
 
         return res.iterator();
     }
