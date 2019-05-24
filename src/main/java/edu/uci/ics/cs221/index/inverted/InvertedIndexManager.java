@@ -1662,6 +1662,8 @@ public class InvertedIndexManager {
                 //List<Integer> posIndex = decodePositionalIndex(offsetList.get(i*2),offsetList.get(i*2+1),posSeg);
                 //System.out.println("Doc: " + inverList.get(i)+" Positional Index : is " + posIndex.toString());
                 positions.put(key,inverList.get(i),posIndexIter.next());
+                //positions.put(key,inverList.get(i),posIndex);
+
             }
         }
         segment.close();
@@ -1718,7 +1720,7 @@ public class InvertedIndexManager {
                 if(!it.hasNext()){return false;}
 
                 prePage = segment.readPage(0);
-                prePageNum = 1;
+                prePageNum = 0;
 
                 return true;
             }
