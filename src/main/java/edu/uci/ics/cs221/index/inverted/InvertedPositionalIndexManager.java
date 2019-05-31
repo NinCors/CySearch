@@ -712,6 +712,7 @@ public class InvertedPositionalIndexManager extends InvertedIndexManager {
      * @param segmentNum n-th segment in the inverted index (start from 0).
      * @return in-memory data structure with all contents in the index segment, null if segmentNum don't exist.
      */
+    @Override
     public PositionalIndexSegmentForTest getIndexSegmentPositional(int segmentNum) {
         File seg = new File(indexFolder+"segment"+segmentNum+".seg");
         File doc = new File(indexFolder+"doc"+segmentNum+".db");
@@ -799,7 +800,6 @@ public class InvertedPositionalIndexManager extends InvertedIndexManager {
         list_buffer.get(bytes);
         return compressor.decode(bytes,0,end-start);
     }
-
 
     /**
      * Keep return the posIndex for one docID
