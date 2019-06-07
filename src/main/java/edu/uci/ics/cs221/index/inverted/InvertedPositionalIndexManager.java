@@ -16,10 +16,16 @@ import java.nio.file.Paths;
 import java.util.*;
 
 public class InvertedPositionalIndexManager extends InvertedIndexManager {
+    /**
+     * Structure:
+     *      dictPart: numOfKeyWord + sizeOfDictPart + numberOfDocument + dictionary(wordLength+word+offset+ Invertedlength + TermFrequencyLength) + endOffset
+     *      bodyPart: invertedList + TermFrequency + Position_Offset_list
+     */
+
 
     protected InvertedPositionalIndexManager(String indexFolder, Analyzer analyzer, Compressor compressor) {
-        docCounter = 0;
-        segmentCounter =0;
+        this.docCounter = 0;
+        this.segmentCounter =0;
         if(indexFolder.charAt(indexFolder.length()-1) != '/'){
             indexFolder += '/';
         }
@@ -30,6 +36,7 @@ public class InvertedPositionalIndexManager extends InvertedIndexManager {
         this.compressor = compressor;
         this.POS_BUFFER = TreeBasedTable.create();
         this.hasPosIndex = true;
+        this.DocumentFrequency = new TreeMap<>();
     }
 
     @Override
@@ -39,8 +46,9 @@ public class InvertedPositionalIndexManager extends InvertedIndexManager {
             return;
         }
 
-        //System.out.println("Current segment buffer is " + this.SEGMENT_BUFFER.toString());
-        //System.out.println("Current position buffer is " + this.POS_BUFFER.toString());
+        System.out.println("Current segment buffer is " + this.SEGMENT_BUFFER.toString());
+        System.out.println("Current position buffer is " + this.POS_BUFFER.toString());
+        System.out.println("Current Term Frequency is " + this.DocumentFrequency.toString());
 
 
         ByteArrayOutputStream invertedListBuffer = new ByteArrayOutputStream();
@@ -58,10 +66,11 @@ public class InvertedPositionalIndexManager extends InvertedIndexManager {
         Set<String> keys = this.SEGMENT_BUFFER.keySet();
 
         //calculate the estimated size of the dictionary part
-        int dic_size = 8;// numberOfKey + SizeOfDictPart
+        int dic_size = 12;// numberOfKey + SizeOfDictPart + numberOfDocument
 
         for(String key:keys){
-            dic_size += (12+key.getBytes(StandardCharsets.UTF_8).length);//offset,listLength,keyLength+real key;
+            //KeyLength + Key + offset+ InvertedListLength + TermFrequencyListLength + DocumentFrequency
+            dic_size += (20+key.getBytes(StandardCharsets.UTF_8).length);
         }
 
         dic_size += 4; // the end of all the file
@@ -69,6 +78,7 @@ public class InvertedPositionalIndexManager extends InvertedIndexManager {
         ByteBuffer dict_part = ByteBuffer.allocate(dic_size+PageFileChannel.PAGE_SIZE - dic_size%PageFileChannel.PAGE_SIZE);
         dict_part.putInt(keys.size());
         dict_part.putInt(dic_size);
+        dict_part.putInt(this.docCounter);
 
         dic_size += (PageFileChannel.PAGE_SIZE - dic_size%PageFileChannel.PAGE_SIZE);
         //System.out.println("Size of dict is : " + dic_size);
@@ -80,11 +90,13 @@ public class InvertedPositionalIndexManager extends InvertedIndexManager {
         //For each key, add its docID to inverted list
         //For each posID of one key and docID, add it to the positional list, and record the offset
         for(String key:keys){
+            //KeyLength + Key + offset+ InvertedListLength + TermFrequencyListLength + DocumentFrequency
+
             try {
 
                 List<Integer> offsetList = new ArrayList<>();
                 List<Integer> docIds = this.SEGMENT_BUFFER.get(key);
-
+                List<Integer> termFrequencyList = new ArrayList<>();
 
                 for(Integer docId:docIds){
                     offsetList.add(posIndexOffset);
@@ -92,14 +104,16 @@ public class InvertedPositionalIndexManager extends InvertedIndexManager {
                     posListBuffer.write(compressed_posId);
                     posIndexOffset += compressed_posId.length;
                     offsetList.add(posIndexOffset);
-
+                    termFrequencyList.add(this.POS_BUFFER.get(key,docId).size());
                 }
 
                 //offsetList.add(posIndexOffset); //add the listEndOffset
 
                 byte[] compressed_docId = this.compressor.encode(docIds);
+                byte[] compressed_tfList = this.compressor.encode(termFrequencyList);
                 byte[] compressed_offsetList = this.compressor.encode(offsetList);
                 invertedListBuffer.write(compressed_docId);
+                invertedListBuffer.write(compressed_tfList);
                 invertedListBuffer.write(compressed_offsetList);
 
 
@@ -107,7 +121,9 @@ public class InvertedPositionalIndexManager extends InvertedIndexManager {
                 dict_part.put(key.getBytes(StandardCharsets.UTF_8));
                 dict_part.putInt(dic_size);
                 dict_part.putInt(compressed_docId.length);//only save the length of docID list
-                dic_size+=(compressed_docId.length+compressed_offsetList.length);
+                dict_part.putInt(compressed_tfList.length);
+                dict_part.putInt(this.DocumentFrequency.get(key));
+                dic_size+=(compressed_docId.length+compressed_tfList.length+compressed_offsetList.length);
 
                 //System.out.println(key + " : "+ offsetList.toString());
             }
@@ -135,10 +151,12 @@ public class InvertedPositionalIndexManager extends InvertedIndexManager {
         segment.close();
         ds.close();
         posIndexSeg.close();
+
         this.segmentCounter++;
         this.DOCSTORE_BUFFER.clear();
         this.SEGMENT_BUFFER.clear();
         this.POS_BUFFER.clear();
+        this.DocumentFrequency.clear();
         this.docCounter = 0;
         try{ invertedListBuffer.close();}
         catch (Exception e){e.printStackTrace();}
@@ -961,5 +979,12 @@ public class InvertedPositionalIndexManager extends InvertedIndexManager {
         return it;
 
     }
+
+
+
+
+
+
+
 
 }

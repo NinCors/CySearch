@@ -104,6 +104,7 @@ public class InvertedIndexManager {
      */
     public static int DEFAULT_MERGE_THRESHOLD = 8;
 
+    protected TreeMap<String,Integer> DocumentFrequency;
 
     protected boolean hasPosIndex;
     protected TreeMap<String,List<Integer>> SEGMENT_BUFFER;
@@ -213,6 +214,14 @@ public class InvertedIndexManager {
                 }
 
                 if(hasPosIndex){
+                    if(!set.contains(word)){
+                        if(!this.DocumentFrequency.containsKey(word)){
+                            this.DocumentFrequency.put(word,0);
+                        }
+                        this.DocumentFrequency.put(word,this.DocumentFrequency.get(word)+1);
+                    }
+
+
                     if(this.POS_BUFFER.contains(word,this.docCounter)){
                         this.POS_BUFFER.get(word,this.docCounter).add(i);
                     }
