@@ -68,13 +68,11 @@ public class Team19PositionalFlushTest {
     @Test
     public void testPositionalFlush1() throws Exception {
         iim.addDocument(new Document("cat dog"));
-
         iim.addDocument(new Document("cat elephant"));
         iim.addDocument(new Document("wolf dog dog"));
         iim.addDocument(new Document("cat dog"));
         iim.flush();
         assertEquals(2, iim.getNumSegments());
-
 
         Map<String, List<Integer>> PostingList = new HashMap<>();
         PostingList.put("cat", Arrays.asList(0, 1));
@@ -96,7 +94,6 @@ public class Team19PositionalFlushTest {
         Positions.put("wolf", 2, Arrays.asList(0));
 
         PositionalIndexSegmentForTest test = iim.getIndexSegmentPositional(0);
-        System.out.println(test.toString());
         assertEquals(PostingList, test.getInvertedLists());
         assertEquals(DocStore, test.getDocuments());
         assertEquals(Positions, test.getPositions());
