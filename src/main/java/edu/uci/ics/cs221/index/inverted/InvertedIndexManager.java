@@ -179,8 +179,6 @@ public class InvertedIndexManager {
         }
     }
 
-
-
     /**
      * Adds a document to the inverted index.
      *      While adding document:
@@ -220,7 +218,6 @@ public class InvertedIndexManager {
                         }
                         this.DocumentFrequency.put(word,this.DocumentFrequency.get(word)+1);
                     }
-
 
                     if(this.POS_BUFFER.contains(word,this.docCounter)){
                         this.POS_BUFFER.get(word,this.docCounter).add(i);
@@ -273,13 +270,14 @@ public class InvertedIndexManager {
         Set<String> keys = this.SEGMENT_BUFFER.keySet();
 
         //calculate the estimated size of the dictionary part
-        int dic_size = 8;// sizeofDictionary + DocumentOffset
+        int dic_size = 12;// sizeofDictionary + DocumentOffset
         for(String key:keys){
             dic_size += (12+key.getBytes(StandardCharsets.UTF_8).length);//offset,listLength,keyLength+real key;
         }
         ByteBuffer dict_part = ByteBuffer.allocate(dic_size+PageFileChannel.PAGE_SIZE - dic_size%PageFileChannel.PAGE_SIZE);
         dict_part.putInt(keys.size());
         dict_part.putInt(dic_size);
+        dict_part.putInt(this.docCounter);
         //System.out.println("Size of dict is : " + dic_size);
 
         dic_size += (PageFileChannel.PAGE_SIZE - dic_size%PageFileChannel.PAGE_SIZE);
@@ -394,7 +392,6 @@ public class InvertedIndexManager {
     }
 
 
-
     public void updateSegementDocFile(int segNum, int mergedSegId){
         File doc_f1 = new File(this.indexFolder+"doc"+segNum+".db");
         File doc_f2 = new File(this.indexFolder+"doc"+(segNum+1)+".db");
@@ -489,15 +486,18 @@ public class InvertedIndexManager {
         segInfo.rewind();
         int seg1_sizeOfDictionary = segInfo.getInt();
         int seg1_offset = segInfo.getInt();
+        int seg1_docNum = segInfo.getInt();
         segInfo = ByteBuffer.allocate(PageFileChannel.PAGE_SIZE);
         segInfo.put(segment1.readPage(0));
         segInfo.rewind();
         int seg2_sizeOfDictionary = segInfo.getInt();
         int seg2_offset = segInfo.getInt();
+        int seg2_docNum = segInfo.getInt();
+
 
         //Build the dictionary part
         int sizeOfDictionary = 0;
-        int offset = seg1_offset+seg2_offset-8;
+        int offset = seg1_offset+seg2_offset-12;
         ByteBuffer dict_part = ByteBuffer.allocate(offset+PageFileChannel.PAGE_SIZE - offset%PageFileChannel.PAGE_SIZE);
         //System.out.println("Budild head_part");
 
@@ -531,6 +531,7 @@ public class InvertedIndexManager {
         }
         dict_part.putInt(sizeOfDictionary);
         dict_part.putInt(offset);
+        dict_part.putInt(seg1_docNum+seg2_docNum);
 
         offset += (PageFileChannel.PAGE_SIZE - offset%PageFileChannel.PAGE_SIZE);
         //System.out.println("nUM KEY"+sizeOfDictionary+"!!!!!!!!!!!merged map is : " +merged_dict.toString());
@@ -872,9 +873,31 @@ public class InvertedIndexManager {
 
     }
 
-    public int getNumDocuments(int segmentNum){throw new UnsupportedOperationException();}
 
-    public int getDocumentFrequency(int segmentNum, String token){{throw new UnsupportedOperationException();}}
+    public int getNumDocuments(int segmentNum){
+        Path indexFilePath = Paths.get(this.indexFolder+"segment"+segmentNum+".seg");
+        PageFileChannel segment = PageFileChannel.createOrOpen(indexFilePath);
+        ByteBuffer segInfo = ByteBuffer.allocate(PageFileChannel.PAGE_SIZE);
+        segInfo.put(segment.readPage(0));
+        segment.close();
+
+        segInfo.rewind();
+        segInfo.getInt();
+        segInfo.getInt();
+        return segInfo.getInt();
+    }
+
+    public int getDocumentFrequency(int segmentNum, String token){
+        Path indexFilePath = Paths.get(this.indexFolder+"segment"+segmentNum+".seg");
+        PageFileChannel segment = PageFileChannel.createOrOpen(indexFilePath);
+        TreeMap<String, int[]> dict = indexDicDecoder(segment);
+        segment.close();
+
+        if(dict.containsKey(token)){
+            return dict.get(token)[3];
+        }
+        return 0;
+    }
 
     /**
      * Performs top-K ranked search using TF-IDF.
@@ -1071,9 +1094,10 @@ public class InvertedIndexManager {
             dic_content.put(segment.readPage(i));
         }
         dic_content.rewind();
-        if(hasPosIndex){ dic_content.getInt();}//get the number of doc
+        dic_content.getInt();//get the number of doc
+
         //loop through the dic_content to extract key
-        //Format -> <key_length, key, offset, length>
+        //Format -> <key_length, key, offset, InvertedLength, TF_List_length, DocumentFrequency>
         while(key_num > 0){
             int key_length =dic_content.getInt();
             byte[] str = new byte[key_length];

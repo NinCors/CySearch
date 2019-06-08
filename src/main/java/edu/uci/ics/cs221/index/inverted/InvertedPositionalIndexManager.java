@@ -7,6 +7,7 @@ import edu.uci.ics.cs221.storage.Document;
 import edu.uci.ics.cs221.storage.DocumentStore;
 import edu.uci.ics.cs221.storage.MapdbDocStore;
 
+import javax.print.Doc;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.nio.ByteBuffer;
@@ -563,8 +564,6 @@ public class InvertedPositionalIndexManager extends InvertedIndexManager {
     @Override
     public Iterator<Document> searchPhraseQuery(List<String> phrase) {
         Preconditions.checkNotNull(phrase);
-        if(!hasPosIndex){throw new UnsupportedOperationException();}
-
 
         List<String> real_phrase = new ArrayList<>();
         for(int i = 0; i<phrase.size();i++){
@@ -1020,13 +1019,12 @@ public class InvertedPositionalIndexManager extends InvertedIndexManager {
     }
 
 
-    @Override
+
     public int getNumDocuments(int segmentNum){
-        Path indexFilePath = Paths.get(this.indexFolder+"segment"+segmentCounter+".seg");
+        Path indexFilePath = Paths.get(this.indexFolder+"segment"+segmentNum+".seg");
         PageFileChannel segment = PageFileChannel.createOrOpen(indexFilePath);
-        ByteBuffer segInfo = ByteBuffer.allocate(PageFileChannel.PAGE_SIZE * 2);
+        ByteBuffer segInfo = ByteBuffer.allocate(PageFileChannel.PAGE_SIZE);
         segInfo.put(segment.readPage(0));
-        segInfo.put(segment.readPage(1));
         segment.close();
 
         segInfo.rewind();
@@ -1035,9 +1033,8 @@ public class InvertedPositionalIndexManager extends InvertedIndexManager {
         return segInfo.getInt();
     }
 
-    @Override
     public int getDocumentFrequency(int segmentNum, String token){
-        Path indexFilePath = Paths.get(this.indexFolder+"segment"+segmentCounter+".seg");
+        Path indexFilePath = Paths.get(this.indexFolder+"segment"+segmentNum+".seg");
         PageFileChannel segment = PageFileChannel.createOrOpen(indexFilePath);
         TreeMap<String, int[]> dict = indexDicDecoder(segment);
         segment.close();
@@ -1048,8 +1045,124 @@ public class InvertedPositionalIndexManager extends InvertedIndexManager {
         return 0;
     }
 
+
     @Override
-    public Iterator<Pair<Document, Double>> searchTfIdf(List<String> keywords, Integer topK){{throw new UnsupportedOperationException();}}
+    public Iterator<Pair<Document, Double>> searchTfIdf(List<String> keywords, Integer topK) {
+        Preconditions.checkNotNull(keywords);
+
+        List<String> real_phrase = new ArrayList<>();
+        for (int i = 0; i < keywords.size(); i++) {
+            //System.out.println(phrase.toString() + " : " + analyzer.analyze(phrase.get(i)));
+            if (analyzer.analyze(keywords.get(i)).size() > 0) {
+                real_phrase.add(analyzer.analyze(keywords.get(i)).get(0));
+            }
+        }
+
+        Iterator<Pair<Document,Double>> it = new Iterator<Pair<Document, Double>>() {
+            @Override
+            public boolean hasNext() {
+                return false;
+            }
+
+            @Override
+            public Pair<Document, Double> next() {
+                return null;
+            }
+        };
+
+
+        return it;
+    }
+
+    public void firstSecondPass(List<String> keywords){
+        int segNum = getNumSegments();
+
+        //First pass, compute the global idf score for each keyword
+        int totalDocNum = 0;
+        HashMap<String, Double> idfs = new HashMap<>();
+        for(int i = 0; i < segNum; i++){
+            totalDocNum += getNumDocuments(segNum);
+            Path indexFilePath = Paths.get(this.indexFolder+"segment"+segNum+".seg");
+            PageFileChannel segment = PageFileChannel.createOrOpen(indexFilePath);
+            TreeMap<String, int[]> dict = indexDicDecoder(segment);
+            segment.close();
+
+            for(String key:keywords){
+                if(dict.containsKey(key)){
+                    if(!idfs.containsKey(key)){
+                        idfs.put(key,0.0);
+                    }
+                    idfs.put(key,idfs.get(key)+dict.get(key)[3]);
+                }
+            }
+        }
+
+        Iterator<Map.Entry<String,Double>> it = idfs.entrySet().iterator();
+        while(it.hasNext()){
+            Map.Entry<String,Double> tmp = it.next();
+            idfs.put(tmp.getKey(),Math.log(idfs.get(tmp.getKey())/totalDocNum));
+        }
+
+        //Calculate query tf-idf
+
+
+
+        //Second Pass
+        Map<Pair<Integer, Integer>, Double> dotProductAccumulator; //  DocID is <SegmentID, LocalDocID> Double is TF-IDF Score
+        Map<Pair<Integer, Integer>, Double> vectorLengthAccumulator;
+
+        Pair pair = new Pair(-1,-1);
+
+        for(int i = 0; i < segNum;i++){
+            Path indexFilePath = Paths.get(this.indexFolder+"segment"+segNum+".seg");
+            PageFileChannel segment = PageFileChannel.createOrOpen(indexFilePath);
+            TreeMap<String, int[]> dict = indexDicDecoder(segment);
+
+            for(String key:keywords){
+                if(dict.containsKey(key)){
+                    List<List<Integer>> localIdfInfo = getLocalTfInfo(dict.get(key),segment);
+                    //loop all the docID on the posting list of key
+                    for(int w = 0; w< localIdfInfo.get(0).size();w++){
+
+                    }
+
+
+                }
+            }
+
+        }
+
+    }
+
+
+    public List<List<Integer>> getLocalTfInfo(int[] keyInfo,PageFileChannel segment) {
+        //KeyInfo: offset, InvertedLength, TF_List_length, DocumentFrequency
+        int startPageNum = keyInfo[0]/PageFileChannel.PAGE_SIZE;
+        int pageOffset = keyInfo[0]%PageFileChannel.PAGE_SIZE;
+
+        int end = keyInfo[0] + keyInfo[1] + keyInfo[2];
+
+        int finishPageNum = end/PageFileChannel.PAGE_SIZE;
+
+        ByteBuffer dataChunk = ByteBuffer.allocate((finishPageNum-startPageNum+1)*PageFileChannel.PAGE_SIZE);
+
+        for(int i = startPageNum; i<=finishPageNum;i++) {
+            dataChunk.put(segment.readPage(i));
+        }
+
+        dataChunk.position(pageOffset);
+        dataChunk.limit(pageOffset+(end-keyInfo[0]));
+
+        byte[] invertedList = new byte[keyInfo[1]]; // get the inverted list
+        byte[] tfList = new byte[keyInfo[2]];
+
+        dataChunk.get(invertedList);
+        dataChunk.get(tfList);
+
+        return Arrays.asList(compressor.decode(invertedList),compressor.decode(tfList));
+    }
+
+
 
 
 }
