@@ -267,7 +267,6 @@ public class InvertedIndexManager {
             return;
         }
 
-
         Path indexFilePath = Paths.get(this.indexFolder+"segment"+segmentCounter+".seg");
         PageFileChannel segment = PageFileChannel.createOrOpen(indexFilePath);
         //get sorted key from the segment buffer
@@ -389,6 +388,8 @@ public class InvertedIndexManager {
         if(this.segmentCounter == this.DEFAULT_MERGE_THRESHOLD){
             mergeAllSegments();
         }
+
+
 
     }
 
@@ -871,6 +872,26 @@ public class InvertedIndexManager {
 
     }
 
+    public int getNumDocuments(int segmentNum){throw new UnsupportedOperationException();}
+
+    public int getDocumentFrequency(int segmentNum, String token){{throw new UnsupportedOperationException();}}
+
+    /**
+     * Performs top-K ranked search using TF-IDF.
+     * Returns an iterator that returns the top K documents with highest TF-IDF scores.
+     *
+     * Each element is a pair of <Document, Double (TF-IDF Score)>.
+     *
+     * If parameter `topK` is null, then returns all the matching documents.
+     *
+     * Unlike Boolean Query and Phrase Query where order of the documents doesn't matter,
+     * for ranked search, order of the document returned by the iterator matters.
+     *
+     * @param keywords, a list of keywords in the query
+     * @param topK, number of top documents weighted by TF-IDF, all documents if topK is null
+     * @return a iterator of top-k ordered documents matching the query
+     */
+    public Iterator<Pair<Document, Double>> searchTfIdf(List<String> keywords, Integer topK){{throw new UnsupportedOperationException();}}
 
     /**
      * Iterates through all the documents in all disk segments.
@@ -930,7 +951,9 @@ public class InvertedIndexManager {
     public int getNumSegments() {
         File file = new File(this.indexFolder);
         String[] filelist = file.list();
-        if(this.segmentCounter != (filelist.length/3)){
+        int numFiles = hasPosIndex? 3:2;
+
+        if(this.segmentCounter != (filelist.length/numFiles)){
             //System.out.println("get segment wrong!");
             return -1;
         }
@@ -1036,7 +1059,7 @@ public class InvertedIndexManager {
 
         int key_num = segInfo.getInt();
         int doc_offset = segInfo.getInt();
-        int doc_num = segInfo.getInt();
+
         int page_num = doc_offset/PageFileChannel.PAGE_SIZE;
 
         //System.out.println("KeyNum: "+key_num+" docOffset: "+ doc_offset + " pageNum: "+page_num);
@@ -1048,6 +1071,7 @@ public class InvertedIndexManager {
             dic_content.put(segment.readPage(i));
         }
         dic_content.rewind();
+        if(hasPosIndex){ dic_content.getInt();}//get the number of doc
         //loop through the dic_content to extract key
         //Format -> <key_length, key, offset, length>
         while(key_num > 0){

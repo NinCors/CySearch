@@ -620,6 +620,7 @@ public class InvertedPositionalIndexManager extends InvertedIndexManager {
         return it;
     }
 
+
     /**
      * Get the common doc ids for the given phrase in this current segNum
      */
@@ -1019,10 +1020,14 @@ public class InvertedPositionalIndexManager extends InvertedIndexManager {
     }
 
 
+    @Override
+    public int getNumDocuments(int segmentNum){throw new UnsupportedOperationException();}
 
+    @Override
+    public int getDocumentFrequency(int segmentNum, String token){{throw new UnsupportedOperationException();}}
 
-
-
+    @Override
+    public Iterator<Pair<Document, Double>> searchTfIdf(List<String> keywords, Integer topK){{throw new UnsupportedOperationException();}}
 
 
 }
