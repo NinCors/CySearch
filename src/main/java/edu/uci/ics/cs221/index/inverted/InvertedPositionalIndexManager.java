@@ -46,9 +46,9 @@ public class InvertedPositionalIndexManager extends InvertedIndexManager {
             return;
         }
 
-        System.out.println("Current segment buffer is " + this.SEGMENT_BUFFER.toString());
-        System.out.println("Current position buffer is " + this.POS_BUFFER.toString());
-        System.out.println("Current Term Frequency is " + this.DocumentFrequency.toString());
+        //System.out.println("Current segment buffer is " + this.SEGMENT_BUFFER.toString());
+        //System.out.println("Current position buffer is " + this.POS_BUFFER.toString());
+        //System.out.println("Current Term Frequency is " + this.DocumentFrequency.toString());
 
 
         ByteArrayOutputStream invertedListBuffer = new ByteArrayOutputStream();
@@ -242,20 +242,23 @@ public class InvertedPositionalIndexManager extends InvertedIndexManager {
         TreeMap<String,List<int[]>> merged_dict = new TreeMap<>();
 
         //get the information of two segement
+        //numberOfKey + SizeOfDictPart + numberOfDocument
         ByteBuffer segInfo = ByteBuffer.allocate(PageFileChannel.PAGE_SIZE);
         segInfo.put(segment1.readPage(0));
         segInfo.rewind();
-        int seg1_sizeOfDictionary = segInfo.getInt();
-        int seg1_offset = segInfo.getInt();
+        int seg1_keyNum = segInfo.getInt();
+        int seg1_dicSize = segInfo.getInt();
+        int seg1_docNum = segInfo.getInt();
         segInfo = ByteBuffer.allocate(PageFileChannel.PAGE_SIZE);
         segInfo.put(segment1.readPage(0));
         segInfo.rewind();
-        int seg2_sizeOfDictionary = segInfo.getInt();
-        int seg2_offset = segInfo.getInt();
+        int seg2_keyNum = segInfo.getInt();
+        int seg2_dicSize = segInfo.getInt();
+        int seg2_docNum = segInfo.getInt();
 
         //Build the dictionary part
         int sizeOfDictionary = 0;
-        int offset = seg1_offset+seg2_offset-8-4;//get rid of the duplicated metainfo
+        int offset = seg1_dicSize+seg2_dicSize-12-4;//get rid of the duplicated metainfo
 
 
         List<String> s1 =  new ArrayList<>(new TreeSet<>(dict1.keySet()));
@@ -263,7 +266,7 @@ public class InvertedPositionalIndexManager extends InvertedIndexManager {
         for(int i = 0; i < s1.size()-1;i++){
             //listsSize.put(s1.get(i)+"1", dict1.get(s1.get(i+1))[0] - dict1.get(s1.get(i))[0]);
 
-            dict1.get(s1.get(i))[2] = 0;
+            dict1.get(s1.get(i))[4] = 0;
 
             if(merged_dict.containsKey(s1.get(i))){
                 merged_dict.get(s1.get(i)).add(dict1.get(s1.get(i)));
@@ -280,7 +283,7 @@ public class InvertedPositionalIndexManager extends InvertedIndexManager {
         List<String> s2 =  new ArrayList<>(new TreeSet<>(dict2.keySet()));
         for(int i = 0; i < s2.size()-1;i++){
             //listsSize.put(s2.get(i)+"2", dict2.get(s2.get(i+1))[0] - dict2.get(s2.get(i))[0]);
-            dict2.get(s2.get(i))[2] = 1;
+            dict2.get(s2.get(i))[4] = 1;
 
             if(merged_dict.containsKey(s2.get(i))){
                 merged_dict.get(s2.get(i)).add(dict2.get(s2.get(i)));
@@ -302,6 +305,8 @@ public class InvertedPositionalIndexManager extends InvertedIndexManager {
 
         dict_part.putInt(sizeOfDictionary);
         dict_part.putInt(offset);
+        dict_part.putInt(seg1_docNum + seg2_docNum);
+
 
         offset += (PageFileChannel.PAGE_SIZE - offset%PageFileChannel.PAGE_SIZE);
 
@@ -309,7 +314,7 @@ public class InvertedPositionalIndexManager extends InvertedIndexManager {
         merged_segement.appendAllBytes(ByteBuffer.allocate(offset));
 
 
-        HashMap<String,List<Integer>> listSize = new HashMap<>();
+        HashMap<String,List<Integer>> listSizeIndicator = new HashMap<>();
 
         ByteBuffer page_tmp = ByteBuffer.allocate(PageFileChannel.PAGE_SIZE);
 
@@ -321,23 +326,34 @@ public class InvertedPositionalIndexManager extends InvertedIndexManager {
         for(Map.Entry<String,List<int[]>> entry:merged_dict.entrySet()){
             //System.out.println("Start merge for " + entry.getKey());
 
+            //Get list bytebuffer
             ByteBuffer lists = null;
             int lists_size = -1;
             int inverted_len = -1;
+            int tf_len = -1;
+            int documentFrequency = -1;
 
+            //if there is only one list
             if(entry.getValue().size()==1){
-                if(entry.getValue().get(0)[2] == 0){
+                if(entry.getValue().get(0)[4] == 0){
                     //Insert k1
                     List<byte[]> k1_list = chunk_it1.next();
-                    lists_size = k1_list.get(0).length + k1_list.get(1).length;
+                    //k1_list = invertedList + offsetList + TermFrequencyList
                     inverted_len = k1_list.get(0).length;
+                    tf_len = k1_list.get(2).length;
+                    documentFrequency = entry.getValue().get(0)[3];
+                    lists_size = inverted_len + k1_list.get(1).length + tf_len;
+
+
                     lists = ByteBuffer.allocate(lists_size);
 
                     lists.put(k1_list.get(0));
+                    lists.put(k1_list.get(2));
                     lists.put(k1_list.get(1));
 
                 }
                 else{
+                    //Insert k2
                     List<byte[]> k2_list = chunk_it2.next();
 
                     List<Integer> k2_invertList = compressor.decode(k2_list.get(0));
@@ -354,37 +370,54 @@ public class InvertedPositionalIndexManager extends InvertedIndexManager {
                     }
                     k2_list.set(1,compressor.encode(k2_offsets));
 
-                    lists_size = k2_list.get(0).length + k2_list.get(1).length;
                     inverted_len = k2_list.get(0).length;
+                    tf_len = k2_list.get(2).length;
+                    documentFrequency = entry.getValue().get(0)[3];
+
+                    lists_size = inverted_len + k2_list.get(1).length + tf_len;
+
                     lists = ByteBuffer.allocate(lists_size);
 
                     lists.put(k2_list.get(0));
+                    lists.put(k2_list.get(2));
                     lists.put(k2_list.get(1));
                 }
             }
+            //if there are two lists, then we need to merge them
             if(entry.getValue().size()==2){ // merged
-                if(entry.getValue().get(0)[2] != 0 || entry.getValue().get(1)[2] != 1){
+                if(entry.getValue().get(0)[4] != 0 || entry.getValue().get(1)[4] != 1){
                     //System.out.println("wtf merged list error!!!");
                     throw new UnsupportedOperationException();
                 }
                 List<byte[]> k1_list = chunk_it1.next();
                 List<byte[]> k2_list = chunk_it2.next();
 
+                //1. Merge inverted List
                 List<Integer> k1_invertList = compressor.decode(k1_list.get(0));
                 List<Integer> k2_invertList = compressor.decode(k2_list.get(0));
+
                 //update the doc id for the second segment
                 for(int i =0; i< k2_invertList.size();i++){
                     k2_invertList.set(i,k2_invertList.get(i)+doc_counter);
                 }
                 k1_invertList.addAll(k2_invertList);
 
+                //2. Merge offset List
                 List<Integer> k1_offsets = compressor.decode(k1_list.get(1));
                 List<Integer> k2_offsets = compressor.decode(k2_list.get(1));
+
                 //update the offset value for the second segment val
                 for(int i =0; i< k2_offsets.size();i++){
                     k2_offsets.set(i,k2_offsets.get(i)+offsetForPos2);
                 }
                 k1_offsets.addAll(k2_offsets);
+
+                //3. Merge term frequency List
+                List<Integer> k1_tf= compressor.decode(k1_list.get(2));
+                List<Integer> k2_tf = compressor.decode(k2_list.get(2));
+                k1_tf.addAll(k2_tf);
+
+                documentFrequency = entry.getValue().get(0)[3] + entry.getValue().get(1)[3];
 
                 /*
                 System.out.println("merge k1 k2");
@@ -394,24 +427,29 @@ public class InvertedPositionalIndexManager extends InvertedIndexManager {
                 System.out.println(k1_offsets.toString());
                 */
 
-
                 k1_list.set(0,compressor.encode(k1_invertList));
                 k1_list.set(1,compressor.encode(k1_offsets));
+                k1_list.set(2,compressor.encode(k1_tf));
 
-                lists_size = k1_list.get(0).length + k1_list.get(1).length;
+                //k1_list = invertedList + offsetList + TermFrequencyList
                 inverted_len = k1_list.get(0).length;
+                tf_len = k1_list.get(2).length;
+                lists_size = inverted_len + k1_list.get(1).length + tf_len;
 
                 lists = ByteBuffer.allocate(lists_size);
 
                 lists.put(k1_list.get(0));
+                lists.put(k1_list.get(2));
                 lists.put(k1_list.get(1));
 
             }
 
-            List<Integer> ls = Arrays.asList(inverted_len,lists_size);
-            listSize.put(entry.getKey(),ls);
+            List<Integer> ls = Arrays.asList(inverted_len,lists_size, tf_len,documentFrequency);
+            listSizeIndicator.put(entry.getKey(),ls);
 
             lists.rewind();
+
+            // Write the lists to disk
 
             if(page_tmp.position()+lists_size < page_tmp.capacity()){
                 page_tmp.put(lists);
@@ -465,23 +503,19 @@ public class InvertedPositionalIndexManager extends InvertedIndexManager {
         //System.out.println("wtf");
         //System.out.println(dict_part.toString());
 
-
         for(Map.Entry<String,List<int[]>> entry:merged_dict.entrySet()){
-            //try {
-            //System.out.println(entry.getKey()+ " : " + dict_part.toString());
+            //Dict format: KeyLength + Key + offset+ InvertedListLength + TermFrequencyListLength + DocumentFrequency
+            //listSizeIndicator: inverted_len,lists_size, tf_len, documentFrequency
 
             dict_part.putInt(entry.getKey().getBytes(StandardCharsets.UTF_8).length);
             dict_part.put(entry.getKey().getBytes(StandardCharsets.UTF_8));
             dict_part.putInt(offset);
+            dict_part.putInt(listSizeIndicator.get(entry.getKey()).get(0));
+            dict_part.putInt(listSizeIndicator.get(entry.getKey()).get(2));
+            dict_part.putInt(listSizeIndicator.get(entry.getKey()).get(3));
 
-            //compute the length of new list
-            dict_part.putInt(listSize.get(entry.getKey()).get(0));
+            offset += listSizeIndicator.get(entry.getKey()).get(1);
 
-            offset += listSize.get(entry.getKey()).get(1);
-
-            //catch (Exception e){
-            //  e.printStackTrace();
-            //}
         }
         //System.out.println(dict_part.toString());
         dict_part.putInt(offset);
@@ -714,10 +748,12 @@ public class InvertedPositionalIndexManager extends InvertedIndexManager {
         dataChunk.limit(pageOffset+(end-keyInfo[0]));
 
         byte[] invertedList = new byte[keyInfo[1]]; // get the inverted list
-        byte[] offsetList = new byte[end-keyInfo[0] - keyInfo[1]]; //get the offset list
+        byte[] tfList = new byte[keyInfo[2]];
+        byte[] offsetList = new byte[end-keyInfo[0] - keyInfo[1] - keyInfo[2]]; //get the offset list
         dataChunk.get(invertedList);
+        dataChunk.get(tfList);
         dataChunk.get(offsetList);
-        return Arrays.asList(compressor.decode(invertedList),compressor.decode(offsetList));
+        return Arrays.asList(compressor.decode(invertedList),compressor.decode(offsetList), compressor.decode(tfList));
     }
 
 
@@ -963,14 +999,16 @@ public class InvertedPositionalIndexManager extends InvertedIndexManager {
                 dataChunk.limit(pageOffset+(cur.getValue()[0]-pre.getValue()[0]));
 
                 byte[] invertedList = new byte[pre.getValue()[1]]; // get the inverted list
-                byte[] offsetList = new byte[cur.getValue()[0] - pre.getValue()[0] - pre.getValue()[1]]; //get the offset list
+                byte[] tfList = new byte[pre.getValue()[2]];
+                byte[] offsetList = new byte[cur.getValue()[0] - (pre.getValue()[0] + pre.getValue()[1]+pre.getValue()[2])]; //get the offset list
                 dataChunk.get(invertedList);
+                dataChunk.get(tfList);
                 dataChunk.get(offsetList);
 
                 pre = cur;
                 prePage.rewind();
 
-                return Arrays.asList(invertedList,offsetList);
+                return Arrays.asList(invertedList,offsetList,tfList);
 
             }
 

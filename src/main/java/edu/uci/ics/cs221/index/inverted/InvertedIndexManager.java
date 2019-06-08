@@ -1026,7 +1026,7 @@ public class InvertedIndexManager {
      *      2. Load all pages that contains the dictionary content into one bytebuffer
      *      3. Keep extract the key from this bytebuffer until reaches the size of dictionary
      * @param segment
-     * @return in-memory data structure of dictionary <Key, [offset, length, which segment]>
+     * @return in-memory data structure of dictionary <Key, [offset, InvertedListLength, TermFrequencyList, DocumentFrequency, which segment]>
      */
 
     public TreeMap<String, int[]> indexDicDecoder(PageFileChannel segment){
@@ -1036,6 +1036,7 @@ public class InvertedIndexManager {
 
         int key_num = segInfo.getInt();
         int doc_offset = segInfo.getInt();
+        int doc_num = segInfo.getInt();
         int page_num = doc_offset/PageFileChannel.PAGE_SIZE;
 
         //System.out.println("KeyNum: "+key_num+" docOffset: "+ doc_offset + " pageNum: "+page_num);
@@ -1054,9 +1055,13 @@ public class InvertedIndexManager {
             byte[] str = new byte[key_length];
             dic_content.get(str);
             String tmp_key = new String(str,StandardCharsets.UTF_8);
-            int[] key_info = new int[3];
+            int[] key_info = new int[5];
             key_info[0] = dic_content.getInt();
             key_info[1] = dic_content.getInt();
+            if(hasPosIndex){
+                key_info[2] = dic_content.getInt();//TF_List_length
+                key_info[3] = dic_content.getInt();//Document Frequency
+            }
             dict.put(tmp_key,key_info);
             key_num--;
 
@@ -1071,7 +1076,7 @@ public class InvertedIndexManager {
             int[] keyinfo = new int[1];
             keyinfo[0] = dic_content.getInt();
             //System.out.println("The last offset is " + keyinfo[0]);
-            dict.put("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz", keyinfo);
+            dict.put("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz", keyinfo);
         }
         return dict;
     }
