@@ -1021,10 +1021,32 @@ public class InvertedPositionalIndexManager extends InvertedIndexManager {
 
 
     @Override
-    public int getNumDocuments(int segmentNum){throw new UnsupportedOperationException();}
+    public int getNumDocuments(int segmentNum){
+        Path indexFilePath = Paths.get(this.indexFolder+"segment"+segmentCounter+".seg");
+        PageFileChannel segment = PageFileChannel.createOrOpen(indexFilePath);
+        ByteBuffer segInfo = ByteBuffer.allocate(PageFileChannel.PAGE_SIZE * 2);
+        segInfo.put(segment.readPage(0));
+        segInfo.put(segment.readPage(1));
+        segment.close();
+
+        segInfo.rewind();
+        segInfo.getInt();
+        segInfo.getInt();
+        return segInfo.getInt();
+    }
 
     @Override
-    public int getDocumentFrequency(int segmentNum, String token){{throw new UnsupportedOperationException();}}
+    public int getDocumentFrequency(int segmentNum, String token){
+        Path indexFilePath = Paths.get(this.indexFolder+"segment"+segmentCounter+".seg");
+        PageFileChannel segment = PageFileChannel.createOrOpen(indexFilePath);
+        TreeMap<String, int[]> dict = indexDicDecoder(segment);
+        segment.close();
+
+        if(dict.containsKey(token)){
+            return dict.get(token)[3];
+        }
+        return 0;
+    }
 
     @Override
     public Iterator<Pair<Document, Double>> searchTfIdf(List<String> keywords, Integer topK){{throw new UnsupportedOperationException();}}
