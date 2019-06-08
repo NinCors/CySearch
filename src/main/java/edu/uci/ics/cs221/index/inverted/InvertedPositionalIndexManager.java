@@ -1104,7 +1104,19 @@ public class InvertedPositionalIndexManager extends InvertedIndexManager {
         }
 
         //Calculate query tf-idf
+        HashMap<String,Double> queryTfIdf = new HashMap<>();
+        for(String key:keywords){
+            if(!queryTfIdf.containsKey(key)){
+                queryTfIdf.put(key,0.0);
+            }
+            queryTfIdf.put(key,queryTfIdf.get(key)+1);
+        }
 
+        Iterator<Map.Entry<String,Double>> it_query = queryTfIdf.entrySet().iterator();
+        while(it_query.hasNext()){
+            Map.Entry<String,Double> tmp = it_query.next();
+            queryTfIdf.put(tmp.getKey(),queryTfIdf.get(tmp.getKey())*idfs.get(tmp.getKey()));
+        }
 
 
         //Second Pass
