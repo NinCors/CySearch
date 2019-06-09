@@ -8,7 +8,22 @@ import java.nio.file.Path;
 import java.util.Iterator;
 import java.util.List;
 
+
+/**
+ * Page Rank Logic:
+ *      1. Load the connection graph between different nodes into memory
+ *      2. Use the score list to record the score of each document with initial value 1
+ *      3. For each literation:
+ *
+ *
+ */
+
+
 public class IcsSearchEngine {
+
+    private InvertedIndexManager indexManager;
+    private Path documentDirectory;
+
 
     /**
      * Initializes an IcsSearchEngine from the directory containing the documents and the
