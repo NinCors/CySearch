@@ -47,10 +47,12 @@ public class InvertedPositionalIndexManager extends InvertedIndexManager {
             return;
         }
 
-        //System.out.println("Current segment buffer is " + this.SEGMENT_BUFFER.toString());
-        //System.out.println("Current position buffer is " + this.POS_BUFFER.toString());
-        //System.out.println("Current Term Frequency is " + this.DocumentFrequency.toString());
-
+        /*
+        System.out.println("Current segment buffer is " + this.SEGMENT_BUFFER.toString());
+        System.out.println("Current position buffer is " + this.POS_BUFFER.toString());
+        System.out.println("Current Term Frequency is " + this.DocumentFrequency.toString());
+        System.out.println("Current doc num is " + this.docCounter);
+        */
 
         ByteArrayOutputStream invertedListBuffer = new ByteArrayOutputStream();
         ByteArrayOutputStream posListBuffer = new ByteArrayOutputStream();
@@ -1070,6 +1072,7 @@ public class InvertedPositionalIndexManager extends InvertedIndexManager {
             public boolean hasNext() {
                 if(first){
                     start();
+                    first = false;
                 }
                 return score_it.hasNext();
             }
@@ -1091,25 +1094,52 @@ public class InvertedPositionalIndexManager extends InvertedIndexManager {
 
     public Document getDocument(Pair<Integer,Integer> docId){
         DocumentStore ds = MapdbDocStore.createOrOpen(this.indexFolder+"doc"+docId.getLeft()+".db");
-        Document res = ds.getDocument(docId.getRight());
+        Document res = ds.getDocument((int)docId.getRight());
         ds.close();
         return res;
     }
 
+
+    public void printDict(TreeMap<String, int[]> dict){
+        Set<String> keys = dict.keySet();
+
+        for(String key:keys){
+            System.out.println("Key : " + key);
+            System.out.println("Offset " + dict.get(key)[0]);
+            System.out.println("Inverted length " + dict.get(key)[1]);
+            System.out.println("tf list length " + dict.get(key)[2]);
+            System.out.println("Document Frequency " + dict.get(key)[3]);
+            System.out.println("------------------------------");
+        }
+    }
+
+
     public Iterator<Pair<Pair<Integer,Integer>, Double>> firstSecondPass(List<String> keywords, Integer topK){
         int segNum = getNumSegments();
-
+        System.out.println("Total Seg number: "+segNum);
+        System.out.println("Search keywords are "+ keywords.toString());
         //First pass, compute the global idf score for each keyword
         int totalDocNum = 0;
         HashMap<String, Double> idfs = new HashMap<>();
+
+        HashSet<String> no_duplicate_keys = new HashSet<>(keywords);
+
+        List<Pair<Pair<Integer,Integer>, Double>> score = new ArrayList<>(); // <DocID, tfidf_score>
+
+
         for(int i = 0; i < segNum; i++){
-            totalDocNum += getNumDocuments(segNum);
-            Path indexFilePath = Paths.get(this.indexFolder+"segment"+segNum+".seg");
+            totalDocNum += getNumDocuments(i);
+            System.out.println("----------------------");
+            System.out.println("For seg-"+i);
+
+            Path indexFilePath = Paths.get(this.indexFolder+"segment"+i+".seg");
             PageFileChannel segment = PageFileChannel.createOrOpen(indexFilePath);
+
             TreeMap<String, int[]> dict = indexDicDecoder(segment);
+            //printDict(dict);
             segment.close();
 
-            for(String key:keywords){
+            for(String key:no_duplicate_keys){
                 if(dict.containsKey(key)){
                     if(!idfs.containsKey(key)){
                         idfs.put(key,0.0);
@@ -1119,10 +1149,21 @@ public class InvertedPositionalIndexManager extends InvertedIndexManager {
             }
         }
 
+        System.out.println("Total Num of docs " + totalDocNum);
+
+        System.out.println("IDFS are " + idfs.toString());
+
+
         Iterator<Map.Entry<String,Double>> it = idfs.entrySet().iterator();
         while(it.hasNext()){
             Map.Entry<String,Double> tmp = it.next();
-            idfs.put(tmp.getKey(),Math.log(idfs.get(tmp.getKey())/totalDocNum));
+            idfs.put(tmp.getKey(),Math.log10(totalDocNum/idfs.get(tmp.getKey())));
+        }
+
+        System.out.println("IDFS are " + idfs.toString());
+
+        if(idfs.size()==0){
+            return score.iterator();
         }
 
         //Calculate query tf-idf
@@ -1137,24 +1178,27 @@ public class InvertedPositionalIndexManager extends InvertedIndexManager {
         Iterator<Map.Entry<String,Double>> it_query = queryTfIdf.entrySet().iterator();
         while(it_query.hasNext()){
             Map.Entry<String,Double> tmp = it_query.next();
+            double x = queryTfIdf.get(tmp.getKey())*idfs.get(tmp.getKey());
             queryTfIdf.put(tmp.getKey(),queryTfIdf.get(tmp.getKey())*idfs.get(tmp.getKey()));
         }
+
+        System.out.println("Query idf is "+ queryTfIdf.toString());
 
         //Second Pass
         Map<Pair<Integer, Integer>, Double> dotProductAccumulator = new HashMap<>(); //  DocID is <SegmentID, LocalDocID> Double is TF-IDF Score
         Map<Pair<Integer, Integer>, Double> vectorLengthAccumulator = new HashMap<>();
-        List<Pair<Pair<Integer,Integer>, Double>> score = new ArrayList<>(); // <DocID, tfidf_score>
 
         Pair pair = new Pair(-1,-1);
 
+        System.out.println("Second pass start");
         for(int i = 0; i < segNum;i++){
-            Path indexFilePath = Paths.get(this.indexFolder+"segment"+segNum+".seg");
+            Path indexFilePath = Paths.get(this.indexFolder+"segment"+i+".seg");
             PageFileChannel segment = PageFileChannel.createOrOpen(indexFilePath);
             TreeMap<String, int[]> dict = indexDicDecoder(segment);
 
             TreeSet<Integer> docIds = new TreeSet<>();
 
-            for(String key:keywords){
+            for(String key:no_duplicate_keys){
                 if(dict.containsKey(key)){
                     List<List<Integer>> localIdfInfo = getLocalTfInfo(dict.get(key),segment);
                     if(localIdfInfo.get(0).size() != localIdfInfo.get(1).size()){
@@ -1163,7 +1207,7 @@ public class InvertedPositionalIndexManager extends InvertedIndexManager {
 
                     //loop all the docID on the posting list of key
                     for(int w = 0; w< localIdfInfo.get(0).size();w++){
-                        pair = pair.of(segNum,localIdfInfo.get(0).get(w));//SegID, DocId
+                        pair = pair.of(i,localIdfInfo.get(0).get(w));//SegID, DocId
                         docIds.add(localIdfInfo.get(0).get(w));
 
                         if(!dotProductAccumulator.containsKey(pair)){
@@ -1180,19 +1224,38 @@ public class InvertedPositionalIndexManager extends InvertedIndexManager {
                 }
             }
 
+            System.out.println("Collected docID "+ docIds.toString() );
+            System.out.println(dotProductAccumulator.toString());
+            System.out.println(vectorLengthAccumulator.toString());
+
             for(Integer docId:docIds){
-                Pair id = pair.of(segNum,docId);
-                pair = pair.of(pair,dotProductAccumulator.get(id)/Math.sqrt(vectorLengthAccumulator.get(id)));
+                Pair id = pair.of(i,docId);
+                if(vectorLengthAccumulator.get(id) == 0){
+                    pair = pair.of(id,0.0);
+                }
+                else {
+                    pair = pair.of(id, dotProductAccumulator.get(id) / Math.sqrt(vectorLengthAccumulator.get(id)));
+                }
                 score.add(pair);
             }
         }
 
-        Collections.sort(score,(p1,p2)-> (int)(p1.getRight()-p2.getRight()));
+        //sort the result
+        Collections.sort(score, new Comparator< Pair<Pair<Integer,Integer>, Double>>() {
+            @Override
+            public int compare( Pair<Pair<Integer,Integer>, Double> p1,  Pair<Pair<Integer,Integer>, Double> p2) {
+                return Double.compare(p2.getRight(),p1.getRight());
+            }
+        });
+
+        System.out.println("Sorted scores are " + score.toString());
+
+
         int size = score.size();
         if(topK==null || size<topK) {
             return score.iterator();
         }
-        return score.subList(size-topK, size).iterator();
+        return score.subList(0, topK).iterator();
     }
 
 

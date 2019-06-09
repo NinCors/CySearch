@@ -875,28 +875,11 @@ public class InvertedIndexManager {
 
 
     public int getNumDocuments(int segmentNum){
-        Path indexFilePath = Paths.get(this.indexFolder+"segment"+segmentNum+".seg");
-        PageFileChannel segment = PageFileChannel.createOrOpen(indexFilePath);
-        ByteBuffer segInfo = ByteBuffer.allocate(PageFileChannel.PAGE_SIZE);
-        segInfo.put(segment.readPage(0));
-        segment.close();
-
-        segInfo.rewind();
-        segInfo.getInt();
-        segInfo.getInt();
-        return segInfo.getInt();
+        throw new UnsupportedOperationException();
     }
 
     public int getDocumentFrequency(int segmentNum, String token){
-        Path indexFilePath = Paths.get(this.indexFolder+"segment"+segmentNum+".seg");
-        PageFileChannel segment = PageFileChannel.createOrOpen(indexFilePath);
-        TreeMap<String, int[]> dict = indexDicDecoder(segment);
-        segment.close();
-
-        if(dict.containsKey(token)){
-            return dict.get(token)[3];
-        }
-        return 0;
+        throw new UnsupportedOperationException();
     }
 
     /**
@@ -1079,6 +1062,7 @@ public class InvertedIndexManager {
 
         TreeMap<String, int[]> dict = new TreeMap<>();
         ByteBuffer segInfo = segment.readPage(0);
+        segInfo.rewind();
 
         int key_num = segInfo.getInt();
         int doc_offset = segInfo.getInt();
@@ -1117,7 +1101,9 @@ public class InvertedIndexManager {
             System.out.println("Read: keyLength: "+ key_length);
             System.out.println("Read: Key: "+ tmp_key);
             System.out.println("Read: Offset: "+ key_info[0]);
-            System.out.println("Read: Length: "+ key_info[1]);*/
+            System.out.println("Read: Length: "+ key_info[1]);
+            */
+
         }
 
         if(hasPosIndex) {
