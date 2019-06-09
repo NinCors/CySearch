@@ -1815,7 +1815,7 @@ public class InvertedIndexManager {
             Iterator<Pair<Pair<Integer,Integer>, Double>> score_it = null;
 
             public void start(){
-                score_it = firstSecondPass(real_phrase,topK);
+                score_it = firstSecondPass(real_phrase,topK).iterator();
             }
 
             @Override
@@ -1864,7 +1864,7 @@ public class InvertedIndexManager {
     }
 
 
-    public Iterator<Pair<Pair<Integer,Integer>, Double>> firstSecondPass(List<String> keywords, Integer topK){
+    public List<Pair<Pair<Integer,Integer>, Double>>firstSecondPass(List<String> keywords, Integer topK){
         int segNum = getNumSegments();
 
         //System.out.println("Total Seg number: "+segNum);
@@ -1915,7 +1915,7 @@ public class InvertedIndexManager {
         //System.out.println("IDFS are " + idfs.toString());
 
         if(idfs.size()==0){
-            return score.iterator();
+            return score;
         }
 
         //Calculate query tf-idf
@@ -2008,9 +2008,9 @@ public class InvertedIndexManager {
 
         int size = score.size();
         if(topK==null || size<topK) {
-            return score.iterator();
+            return score;
         }
-        return score.subList(0, topK).iterator();
+        return score.subList(0, topK);
     }
 
 
