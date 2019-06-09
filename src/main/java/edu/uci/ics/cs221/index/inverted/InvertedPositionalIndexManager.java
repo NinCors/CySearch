@@ -1059,13 +1059,28 @@ public class InvertedPositionalIndexManager extends InvertedIndexManager {
         }
 
         Iterator<Pair<Document,Double>> it = new Iterator<Pair<Document, Double>>() {
+            boolean first = true;
+            Iterator<Pair<Pair<Integer,Integer>, Double>> score_it = null;
+
+            public void start(){
+                score_it = firstSecondPass(real_phrase,topK);
+            }
+
             @Override
             public boolean hasNext() {
-                return false;
+                if(first){
+                    start();
+                }
+                return score_it.hasNext();
             }
 
             @Override
             public Pair<Document, Double> next() {
+                if(hasNext()){
+                    Pair<Pair<Integer,Integer>, Double> cur = score_it.next();
+                    Pair<Document, Double> res = new Pair(getDocument(cur.getLeft()),cur.getRight());
+                    return res;
+                }
                 return null;
             }
         };
@@ -1074,7 +1089,14 @@ public class InvertedPositionalIndexManager extends InvertedIndexManager {
         return it;
     }
 
-    public List<Pair<Pair<Integer,Integer>, Double>> firstSecondPass(List<String> keywords){
+    public Document getDocument(Pair<Integer,Integer> docId){
+        DocumentStore ds = MapdbDocStore.createOrOpen(this.indexFolder+"doc"+docId.getLeft()+".db");
+        Document res = ds.getDocument(docId.getRight());
+        ds.close();
+        return res;
+    }
+
+    public Iterator<Pair<Pair<Integer,Integer>, Double>> firstSecondPass(List<String> keywords, Integer topK){
         int segNum = getNumSegments();
 
         //First pass, compute the global idf score for each keyword
@@ -1166,7 +1188,11 @@ public class InvertedPositionalIndexManager extends InvertedIndexManager {
         }
 
         Collections.sort(score,(p1,p2)-> (int)(p1.getRight()-p2.getRight()));
-        return score;
+        int size = score.size();
+        if(topK==null || size<topK) {
+            return score.iterator();
+        }
+        return score.subList(size-topK, size).iterator();
     }
 
 

@@ -1318,13 +1318,10 @@ public class InvertedIndexManager {
     }
 
     public static void main(String[] args) throws Exception {
-        hashMapTest();
+        List<Integer>x = Arrays.asList(1,2,3);
 
-        double a = 0.0/0.0;
+        System.out.println(x.subList(3-2,3));
 
-        int b = a> (double)(2/3)? 0:1;
-
-        System.out.println(b);
     }
 
 }
