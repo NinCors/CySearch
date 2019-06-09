@@ -1074,7 +1074,7 @@ public class InvertedPositionalIndexManager extends InvertedIndexManager {
         return it;
     }
 
-    public void firstSecondPass(List<String> keywords){
+    public List<Pair<Pair<Integer,Integer>, Double>> firstSecondPass(List<String> keywords){
         int segNum = getNumSegments();
 
         //First pass, compute the global idf score for each keyword
@@ -1118,10 +1118,10 @@ public class InvertedPositionalIndexManager extends InvertedIndexManager {
             queryTfIdf.put(tmp.getKey(),queryTfIdf.get(tmp.getKey())*idfs.get(tmp.getKey()));
         }
 
-
         //Second Pass
-        Map<Pair<Integer, Integer>, Double> dotProductAccumulator; //  DocID is <SegmentID, LocalDocID> Double is TF-IDF Score
-        Map<Pair<Integer, Integer>, Double> vectorLengthAccumulator;
+        Map<Pair<Integer, Integer>, Double> dotProductAccumulator = new HashMap<>(); //  DocID is <SegmentID, LocalDocID> Double is TF-IDF Score
+        Map<Pair<Integer, Integer>, Double> vectorLengthAccumulator = new HashMap<>();
+        List<Pair<Pair<Integer,Integer>, Double>> score = new ArrayList<>(); // <DocID, tfidf_score>
 
         Pair pair = new Pair(-1,-1);
 
@@ -1130,20 +1130,43 @@ public class InvertedPositionalIndexManager extends InvertedIndexManager {
             PageFileChannel segment = PageFileChannel.createOrOpen(indexFilePath);
             TreeMap<String, int[]> dict = indexDicDecoder(segment);
 
+            TreeSet<Integer> docIds = new TreeSet<>();
+
             for(String key:keywords){
                 if(dict.containsKey(key)){
                     List<List<Integer>> localIdfInfo = getLocalTfInfo(dict.get(key),segment);
-                    //loop all the docID on the posting list of key
-                    for(int w = 0; w< localIdfInfo.get(0).size();w++){
-
+                    if(localIdfInfo.get(0).size() != localIdfInfo.get(1).size()){
+                        System.out.println("Local idf information is worrrong!!!!");
                     }
 
+                    //loop all the docID on the posting list of key
+                    for(int w = 0; w< localIdfInfo.get(0).size();w++){
+                        pair = pair.of(segNum,localIdfInfo.get(0).get(w));//SegID, DocId
+                        docIds.add(localIdfInfo.get(0).get(w));
 
+                        if(!dotProductAccumulator.containsKey(pair)){
+                            dotProductAccumulator.put(pair,0.0);
+                        }
+                        if(!vectorLengthAccumulator.containsKey(pair)){
+                            vectorLengthAccumulator.put(pair,0.0);
+                        }
+
+                        double tfidf = localIdfInfo.get(1).get(w) * idfs.get(key);
+                        dotProductAccumulator.put(pair, dotProductAccumulator.get(pair)+(tfidf*queryTfIdf.get(key)));
+                        vectorLengthAccumulator.put(pair,vectorLengthAccumulator.get(pair)+(tfidf*tfidf));
+                    }
                 }
             }
 
+            for(Integer docId:docIds){
+                Pair id = pair.of(segNum,docId);
+                pair = pair.of(pair,dotProductAccumulator.get(id)/Math.sqrt(vectorLengthAccumulator.get(id)));
+                score.add(pair);
+            }
         }
 
+        Collections.sort(score,(p1,p2)-> (int)(p1.getRight()-p2.getRight()));
+        return score;
     }
 
 
