@@ -16,6 +16,9 @@ public class DeltaVarLenCompressor implements Compressor{
     //@Override
     public byte[] encode(List<Integer> integers) {
         ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+        if(integers.size()==0){
+            return outputStream.toByteArray();
+        }
         int pre = integers.get(0);
 
         for(int i = 0; i<integers.size();i++){
