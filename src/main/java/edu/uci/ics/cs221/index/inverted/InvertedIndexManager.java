@@ -2044,13 +2044,11 @@ public class InvertedIndexManager {
 
 
     public static void main(String[] args) throws Exception {
-        List<Integer>x = new ArrayList<>();
+        String x = "10         20";
 
-        Compressor cp = new DeltaVarLenCompressor();
+        String [] docId = x.split("\\s+");
 
-
-        System.out.println(cp.decode(cp.encode(x)));
-
+        System.out.println(docId[0]+ " "+ docId[1]+" "+docId.length);
     }
 
 }
