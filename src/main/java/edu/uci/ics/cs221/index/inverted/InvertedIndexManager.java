@@ -135,7 +135,7 @@ public class InvertedIndexManager {
 
     private InvertedIndexManager(String indexFolder, Analyzer analyzer) {
         init(indexFolder,analyzer);
-        this.compressor = new DeltaVarLenCompressor();
+        this.compressor = new NaiveCompressor();
         this.hasPosIndex = false;
     }
 
@@ -286,10 +286,6 @@ public class InvertedIndexManager {
         ByteArrayOutputStream invertedListBuffer = new ByteArrayOutputStream();
         ByteArrayOutputStream posListBuffer = new ByteArrayOutputStream();
 
-        //Create the segement file
-        Path indexFilePath = Paths.get(this.indexFolder+"segment"+segmentCounter+".seg");
-        PageFileChannel segment = PageFileChannel.createOrOpen(indexFilePath);
-
 
         //get sorted key from the segment buffer
         Set<String> keys = this.SEGMENT_BUFFER.keySet();
@@ -330,14 +326,14 @@ public class InvertedIndexManager {
 
 
                 for(Integer docId:docIds){
-                    offsetList.add(posIndexOffset);
-
                     if(hasPosIndex) {
+                        offsetList.add(posIndexOffset);
                         byte[] compressed_posId = this.compressor.encode(this.POS_BUFFER.get(key, docId));
                         posListBuffer.write(compressed_posId);
                         posIndexOffset += compressed_posId.length;
+
+                        offsetList.add(posIndexOffset);
                     }
-                    offsetList.add(posIndexOffset);
                     termFrequencyList.add(this.POS_BUFFER.get(key,docId).size());
                 }
 
@@ -358,10 +354,10 @@ public class InvertedIndexManager {
 
                 dict_part.putInt(key.getBytes(StandardCharsets.UTF_8).length);
                 dict_part.put(key.getBytes(StandardCharsets.UTF_8));
-                dict_part.putInt(dic_size);
-                dict_part.putInt(compressed_docId.length);//only save the length of docID list
-                dict_part.putInt(compressed_tfList.length);
-                dict_part.putInt(this.DocumentFrequency.get(key));
+                dict_part.putInt(dic_size); //offset
+                dict_part.putInt(compressed_docId.length);//inverted list length
+                dict_part.putInt(compressed_tfList.length); //term frequency list length
+                dict_part.putInt(this.DocumentFrequency.get(key));//document frequency
                 dic_size+=length;
 
                 //System.out.println(key + " : "+ offsetList.toString());
@@ -374,6 +370,9 @@ public class InvertedIndexManager {
         dict_part.rewind();
         //System.out.println("Size of list end is : " + dic_size);
 
+        //Create the segement file
+        Path indexFilePath = Paths.get(this.indexFolder+"segment"+segmentCounter+".seg");
+        PageFileChannel segment = PageFileChannel.createOrOpen(indexFilePath);
         //write the dictionary part + <InvertedList + PositionOffsetList> into segement file
         segment.appendAllBytes(dict_part);
         segment.appendAllBytes(ByteBuffer.wrap(invertedListBuffer.toByteArray()));
@@ -400,6 +399,7 @@ public class InvertedIndexManager {
         this.POS_BUFFER.clear();
         this.DocumentFrequency.clear();
         this.docCounter = 0;
+
         try{ invertedListBuffer.close();}
         catch (Exception e){e.printStackTrace();}
 
@@ -1175,7 +1175,7 @@ public class InvertedIndexManager {
      * Decode one posting list from segment file based on the dictionary information <offset, length>
      * Program logic:
      *
-     * @param keyInfo -> [offset, length]
+     * @param keyInfo -> [offset, invertedLength, termFrequencyListLength, DocumentFrequency]
      * @param segment
      * @return
      */
@@ -1270,12 +1270,11 @@ public class InvertedIndexManager {
 
         }
 
-        if(hasPosIndex) {
-            int[] keyinfo = new int[1];
-            keyinfo[0] = dic_content.getInt();
-            //System.out.println("The last offset is " + keyinfo[0]);
-            dict.put("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz", keyinfo);
-        }
+        int[] keyinfo = new int[1];
+        keyinfo[0] = dic_content.getInt();
+        //System.out.println("The last offset is " + keyinfo[0]);
+        dict.put("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz", keyinfo);
+
         return dict;
     }
 
@@ -1303,6 +1302,7 @@ public class InvertedIndexManager {
 
     public Iterator<Document> searchPhraseQuery(List<String> phrase) {
         Preconditions.checkNotNull(phrase);
+        if(!hasPosIndex){throw new UnsupportedOperationException();}
 
         List<String> real_phrase = new ArrayList<>();
         for(int i = 0; i<phrase.size();i++){
@@ -1668,7 +1668,6 @@ public class InvertedIndexManager {
     }
 
 
-
     /**
      * Keep return the data chunk of one key in one segment
      * Get the dictionary of one segement first
@@ -1867,8 +1866,10 @@ public class InvertedIndexManager {
 
     public Iterator<Pair<Pair<Integer,Integer>, Double>> firstSecondPass(List<String> keywords, Integer topK){
         int segNum = getNumSegments();
-        System.out.println("Total Seg number: "+segNum);
-        System.out.println("Search keywords are "+ keywords.toString());
+
+        //System.out.println("Total Seg number: "+segNum);
+        //System.out.println("Search keywords are "+ keywords.toString());
+
         //First pass, compute the global idf score for each keyword
         int totalDocNum = 0;
         HashMap<String, Double> idfs = new HashMap<>();
@@ -1880,8 +1881,9 @@ public class InvertedIndexManager {
 
         for(int i = 0; i < segNum; i++){
             totalDocNum += getNumDocuments(i);
-            System.out.println("----------------------");
-            System.out.println("For seg-"+i);
+
+            //System.out.println("----------------------");
+            //System.out.println("For seg-"+i);
 
             Path indexFilePath = Paths.get(this.indexFolder+"segment"+i+".seg");
             PageFileChannel segment = PageFileChannel.createOrOpen(indexFilePath);
@@ -1900,9 +1902,8 @@ public class InvertedIndexManager {
             }
         }
 
-        System.out.println("Total Num of docs " + totalDocNum);
-
-        System.out.println("IDFS are " + idfs.toString());
+        //System.out.println("Total Num of docs " + totalDocNum);
+        //System.out.println("IDFS are " + idfs.toString());
 
 
         Iterator<Map.Entry<String,Double>> it = idfs.entrySet().iterator();
@@ -1911,7 +1912,7 @@ public class InvertedIndexManager {
             idfs.put(tmp.getKey(),Math.log10(totalDocNum/idfs.get(tmp.getKey())));
         }
 
-        System.out.println("IDFS are " + idfs.toString());
+        //System.out.println("IDFS are " + idfs.toString());
 
         if(idfs.size()==0){
             return score.iterator();
@@ -1933,7 +1934,7 @@ public class InvertedIndexManager {
             queryTfIdf.put(tmp.getKey(),queryTfIdf.get(tmp.getKey())*idfs.get(tmp.getKey()));
         }
 
-        System.out.println("Query idf is "+ queryTfIdf.toString());
+        //System.out.println("Query idf is "+ queryTfIdf.toString());
 
         //Second Pass
         Map<Pair<Integer, Integer>, Double> dotProductAccumulator = new HashMap<>(); //  DocID is <SegmentID, LocalDocID> Double is TF-IDF Score
@@ -1941,7 +1942,8 @@ public class InvertedIndexManager {
 
         Pair pair = new Pair(-1,-1);
 
-        System.out.println("Second pass start");
+        //System.out.println("Second pass start");
+
         for(int i = 0; i < segNum;i++){
             Path indexFilePath = Paths.get(this.indexFolder+"segment"+i+".seg");
             PageFileChannel segment = PageFileChannel.createOrOpen(indexFilePath);
@@ -1975,9 +1977,11 @@ public class InvertedIndexManager {
                 }
             }
 
+            /*
             System.out.println("Collected docID "+ docIds.toString() );
             System.out.println(dotProductAccumulator.toString());
             System.out.println(vectorLengthAccumulator.toString());
+             */
 
             for(Integer docId:docIds){
                 Pair id = pair.of(i,docId);
@@ -1999,7 +2003,7 @@ public class InvertedIndexManager {
             }
         });
 
-        System.out.println("Sorted scores are " + score.toString());
+        //System.out.println("Sorted scores are " + score.toString());
 
 
         int size = score.size();
@@ -2036,7 +2040,6 @@ public class InvertedIndexManager {
 
         return Arrays.asList(compressor.decode(invertedList),compressor.decode(tfList));
     }
-
 
 
 
