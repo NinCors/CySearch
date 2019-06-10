@@ -1,5 +1,6 @@
 package edu.uci.ics.cs221.search;
 
+import com.google.common.collect.ImmutableList;
 import edu.uci.ics.cs221.index.inverted.InvertedIndexManager;
 import edu.uci.ics.cs221.index.inverted.Pair;
 import edu.uci.ics.cs221.storage.Document;
@@ -54,10 +55,12 @@ public class IcsSearchEngine {
         try {
             for(int i =0; i< totalDocNum; i++){
                 List<String> lines= Files.readAllLines(Paths.get(documentDirectory + "/cleaned/"+Integer.toString(i)));
+
                 String doc = "";
                 for(String line:lines){
                     doc+=line+"\n";
                 }
+
                 this.indexManager.addDocument(new Document(doc));
             }
         }
@@ -171,7 +174,44 @@ public class IcsSearchEngine {
      * This is a workaround because our project doesn't support multiple fields. We cannot keep the documentID in a separate column.
      */
     public Iterator<Pair<Document, Double>> searchQuery(List<String> query, int topK, double pageRankWeight) {
-        throw new UnsupportedOperationException();
+
+        Iterator<Pair<Document, Double>> it = this.indexManager.searchTfIdf(query,null);
+
+
+        PriorityQueue<Pair<Document,Double>> maxHeap = new PriorityQueue<Pair<Document,Double>>(topK, new Comparator<Pair<Document, Double>>() {
+            @Override
+            public int compare(Pair<Document, Double> p1, Pair<Document, Double> p2) {
+                return Double.compare(p1.getRight(),p2.getRight());
+
+            }
+        });
+
+        while(it.hasNext()){
+            Pair<Document, Double> cur = it.next();
+            int docId = Integer.parseInt(cur.getLeft().getText().split("\n")[0]);
+
+            if(maxHeap.size() < topK){
+                maxHeap.offer(new Pair<Document, Double>(cur.getLeft(), cur.getRight() + pageRankWeight*this.pageRankScores.get(docId)));
+            }
+            else{
+                if(maxHeap.peek().getRight() < cur.getRight() + pageRankWeight*this.pageRankScores.get(docId)){
+                    maxHeap.poll();
+                    maxHeap.offer(new Pair<Document, Double>(cur.getLeft(), cur.getRight() + pageRankWeight*this.pageRankScores.get(docId)));
+                }
+            }
+        }
+
+        List<Pair<Document,Double>> res = new ArrayList<>(maxHeap);
+
+        //sort the result
+        Collections.sort(res, new Comparator<Pair<Document,Double>>() {
+            @Override
+            public int compare( Pair<Document,Double> p1,  Pair<Document,Double> p2) {
+                return Double.compare(p2.getRight(),p1.getRight());
+            }
+        });
+
+        return res.iterator();
     }
 
 }

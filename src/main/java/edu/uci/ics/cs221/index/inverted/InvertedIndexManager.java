@@ -210,6 +210,9 @@ public class InvertedIndexManager {
     public void addDocument(Document document) {
 
         List<String> words = this.analyzer.analyze(document.getText());
+
+        //System.out.println("Add document with key words " + words.toString());
+
         DOCSTORE_BUFFER.put(this.docCounter, document);
         HashSet<String> set = new HashSet<>();
         for(int i =0;i<words.size();i++){
@@ -553,14 +556,12 @@ public class InvertedIndexManager {
 
         //Build the dictionary part
         int sizeOfDictionary = 0;
-        int offset = seg1_dicSize+seg2_dicSize-12-4;//get rid of the duplicated metainfo
-
 
         List<String> s1 =  new ArrayList<>(new TreeSet<>(dict1.keySet()));
         //HashMap<String,Integer> listsSize= new HashMap<>();
         for(int i = 0; i < s1.size()-1;i++){
             //listsSize.put(s1.get(i)+"1", dict1.get(s1.get(i+1))[0] - dict1.get(s1.get(i))[0]);
-
+            if(dict1.get(s1.get(i)).length==1){continue;}
             dict1.get(s1.get(i))[4] = 0;
 
             if(merged_dict.containsKey(s1.get(i))){
@@ -578,6 +579,8 @@ public class InvertedIndexManager {
         List<String> s2 =  new ArrayList<>(new TreeSet<>(dict2.keySet()));
         for(int i = 0; i < s2.size()-1;i++){
             //listsSize.put(s2.get(i)+"2", dict2.get(s2.get(i+1))[0] - dict2.get(s2.get(i))[0]);
+            if(dict2.get(s2.get(i)).length==1){continue;}
+
             dict2.get(s2.get(i))[4] = 1;
 
             if(merged_dict.containsKey(s2.get(i))){
@@ -593,6 +596,14 @@ public class InvertedIndexManager {
 
         }
 
+        int offset = 12;
+
+        for(String key:merged_dict.keySet()){
+            offset += (20 + key.getBytes(StandardCharsets.UTF_8).length);
+        }
+
+        offset += 4;
+
         //count how many page it used for offset
         int head_page_size = 1+ offset/PageFileChannel.PAGE_SIZE;
         //System.out.println("Offset is :" + offset);
@@ -602,6 +613,7 @@ public class InvertedIndexManager {
         dict_part.putInt(offset);
         dict_part.putInt(seg1_docNum + seg2_docNum);
 
+        int tmp_offset = offset;
 
         offset += (PageFileChannel.PAGE_SIZE - offset%PageFileChannel.PAGE_SIZE);
 
@@ -801,6 +813,7 @@ public class InvertedIndexManager {
             //Dict format: KeyLength + Key + offset+ InvertedListLength + TermFrequencyListLength + DocumentFrequency
             //listSizeIndicator: inverted_len,lists_size, tf_len, documentFrequency
 
+
             dict_part.putInt(entry.getKey().getBytes(StandardCharsets.UTF_8).length);
             dict_part.put(entry.getKey().getBytes(StandardCharsets.UTF_8));
             dict_part.putInt(offset);
@@ -813,6 +826,16 @@ public class InvertedIndexManager {
         }
         //System.out.println(dict_part.toString());
         dict_part.putInt(offset);
+
+
+        /*
+        System.out.println("Merging " + segNum1 + " and " + segNum2 + " to " + mergedSegId);
+        System.out.println("Dict_part info : " + dict_part.limit());
+        System.out.println("Head page num : " + head_page_size);
+        System.out.println("offset " + tmp_offset);
+        System.out.println("number of docs " + (seg1_docNum + seg2_docNum));
+        System.out.println("Size of key " + sizeOfDictionary + " : " + (seg1_keyNum + seg2_keyNum));
+        */
 
 
         for(int i =0; i< head_page_size; i++){
@@ -1270,10 +1293,17 @@ public class InvertedIndexManager {
 
         }
 
+
+        TreeSet<String> ts = new TreeSet<>(dict.keySet());
+
+        if(ts.size()==0){
+            return dict;
+        }
+
         int[] keyinfo = new int[1];
         keyinfo[0] = dic_content.getInt();
         //System.out.println("The last offset is " + keyinfo[0]);
-        dict.put("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz", keyinfo);
+        dict.put(ts.last()+"z", keyinfo);
 
         return dict;
     }
@@ -1724,7 +1754,18 @@ public class InvertedIndexManager {
 
                 int finishPageNum = cur.getValue()[0]/PageFileChannel.PAGE_SIZE;
 
-                ByteBuffer dataChunk = ByteBuffer.allocate((finishPageNum-startPageNum+1)*PageFileChannel.PAGE_SIZE).put(prePage);
+                ByteBuffer dataChunk = null;
+                try {
+                     dataChunk = ByteBuffer.allocate((finishPageNum - startPageNum + 1) * PageFileChannel.PAGE_SIZE).put(prePage);
+                }
+                catch (Exception e){
+                    e.printStackTrace();
+                    System.out.println("Cur "+cur.toString()+" "+ cur.getValue()[0]);
+                    System.out.println("Pre "+pre.toString()+ " " + pre.getValue()[0]);
+                    System.out.println("FinishPageNum "+finishPageNum);
+                    System.out.println("StartPage " + startPageNum);
+                    throw new UnsupportedOperationException();
+                }
 
                 for(int i = startPageNum+1; i<=finishPageNum;i++){
                     prePage = segment.readPage(i);
@@ -1809,6 +1850,8 @@ public class InvertedIndexManager {
                 real_phrase.add(analyzer.analyze(keywords.get(i)).get(0));
             }
         }
+
+        //System.out.println("Searching for the " + real_phrase.toString());
 
         Iterator<Pair<Document,Double>> it = new Iterator<Pair<Document, Double>>() {
             boolean first = true;
@@ -2044,11 +2087,16 @@ public class InvertedIndexManager {
 
 
     public static void main(String[] args) throws Exception {
-        String x = "10         20";
+        String x = "zübeck";
 
-        String [] docId = x.split("\\s+");
+        String y = "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz";
 
-        System.out.println(docId[0]+ " "+ docId[1]+" "+docId.length);
+        TreeSet<String> ts = new TreeSet<>();
+
+        ts.add(x);
+        ts.add(y);
+
+        System.out.println(ts.last());
     }
 
 }
